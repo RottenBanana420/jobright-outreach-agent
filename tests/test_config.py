@@ -74,3 +74,22 @@ def test_bad_config_stops_the_shortlist_command_too(env: Env) -> None:
     assert result.code != 0
     assert "shortlist_size" in result.err
     assert not (env.run_dir / "shortlist.json").exists()
+
+
+def test_resume_files_default_to_the_design_table_and_can_be_overridden(env: Env) -> None:
+    code, settings, _ = show(env)
+    assert code == 0
+    assert settings["resume_files"]["ml"] == "Kusai_Hajuri_Resume_ML_Engineer.pdf"  # type: ignore[index]
+
+    env.write_config('[resume_files]\nml = "mine.pdf"\n')
+    _, settings, _ = show(env)
+    files = settings["resume_files"]
+    assert files["ml"] == "mine.pdf"  # type: ignore[index]
+    assert files["ai"] == "Kusai_Hajuri_Resume_AI_Engineer.pdf"  # type: ignore[index]
+
+
+def test_an_unknown_resume_variant_in_the_config_is_named(env: Env) -> None:
+    env.write_config('[resume_files]\nrust = "x.pdf"\n')
+    code, _, err = show(env)
+    assert code == 2
+    assert "resume_files.rust" in err
