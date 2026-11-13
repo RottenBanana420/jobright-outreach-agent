@@ -49,10 +49,10 @@ The project is in planning. The full requirements are in [docs/project-brief.md]
 
 | Milestone | Deliverable | State |
 |---|---|---|
-| 1. Feasibility | Report on what Claude in Chrome can read from Jobright | Next |
-| 2. Application extraction | Today's confirmed applications as JSON | Planned |
-| 3. Ranking | Ranked top 10 with reasons | Planned |
-| 4. Contact discovery | Contact list with source links | Planned |
+| 1. Feasibility | Report on what Claude in Chrome can read from Jobright | Done |
+| 2. Application extraction | Today's confirmed applications as JSON | Trial done |
+| 3. Ranking | Ranked top 10 with reasons | Next |
+| 4. Contact discovery | Contact list with source links | Trial done ([report](docs/milestone-4-contacts.md)) |
 | 5. Email generation | Draft previews with attachments | Planned |
 | 6. Gmail integration | OAuth and draft creation | Planned |
 | 7. Approval workflow | Review screen and controlled sending | Planned |
