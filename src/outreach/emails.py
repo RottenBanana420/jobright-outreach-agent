@@ -84,9 +84,17 @@ def prepare_emails(
     result = Prepared()
     claimed: dict[str, str] = {}
     groups: set[int] = set()
+    # An address that already has a locked (sent or on its way out) email is taken, whatever the order of
+    # `plan`: a second Contact at that address must not get an email.
+    existing_by_contact: dict[int, sqlite3.Row | None] = {}
+    for contact, _, _ in plan:
+        existing = store.email_for(contact["id"], contact["group_id"])
+        existing_by_contact[contact["id"]] = existing
+        if existing is not None and existing["status"] in LOCKED:
+            claimed.setdefault(existing["address"], contact["name"])
     for contact, address, e in plan:
         label = f"{contact['name']} ({contact['company']})"
-        existing = store.email_for(contact["id"], contact["group_id"])
+        existing = existing_by_contact[contact["id"]]
         if existing is not None and existing["status"] in LOCKED:
             result.skipped.append(f"{label}: already {existing['status']}, left as it is")
             continue

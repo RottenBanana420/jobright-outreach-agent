@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 
-from outreach.gmail import DraftContent, GmailError, SentMessage, build_mime
+from outreach.gmail import DraftContent, GmailError, GmailNotFound, SentMessage, build_mime
 
 
 @dataclass
@@ -31,6 +31,7 @@ class FakeGmail:
     labels: dict[str, set[str]] = field(default_factory=dict)  # Gmail message id -> label names
     calls: list[tuple[str, str]] = field(default_factory=list)  # (operation, draft id or message id)
     send_times: list[float] = field(default_factory=list)
+    rewrite_message_ids: bool = False  # Gmail replaces the Message-ID on send, so Sent cannot be searched by it
     _failures: dict[str, list[_Failure]] = field(default_factory=dict)
     _count: dict[str, int] = field(default_factory=dict)
     _next: int = 0
@@ -85,7 +86,7 @@ class FakeGmail:
     def update_draft(self, draft_id: str, content: DraftContent) -> None:
         failure = self._enter("update_draft", draft_id)
         if draft_id not in self.drafts:
-            raise GmailError(f"draft {draft_id} not found")
+            raise GmailNotFound(f"draft {draft_id} not found")
         self.drafts[draft_id] = build_mime(content)
         if failure:
             raise failure.error
@@ -93,9 +94,14 @@ class FakeGmail:
     def send_draft(self, draft_id: str) -> SentMessage:
         failure = self._enter("send_draft", draft_id)
         if draft_id not in self.drafts:
-            raise GmailError(f"draft {draft_id} not found")
+            raise GmailNotFound(f"draft {draft_id} not found")
         gmail_id = self._id("msg")
-        self.sent[gmail_id] = self.drafts.pop(draft_id)
+        raw = self.drafts.pop(draft_id)
+        if self.rewrite_message_ids:
+            message = parse(raw)
+            message.replace_header("Message-ID", f"<rewritten-{gmail_id}@mail.gmail.test>")
+            raw = message.as_bytes()
+        self.sent[gmail_id] = raw
         self.send_times.append(time.monotonic())
         if failure:
             raise failure.error

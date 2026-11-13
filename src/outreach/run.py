@@ -125,12 +125,14 @@ def start_run(
         store.set_status("runs", run_id, "running", "resumed" if resumed else "started")
         store.set_run_processes(run_id, os.getpid(), None, None)
     caffeinate = launcher.start_caffeinate()
-    _remember(db_path, run_id, caffeinate=caffeinate)
     code = 1
     try:
-        code = launcher.run_claude(
-            f"/outreach-run {run_dir}", config.model, lambda pid: _remember(db_path, run_id, claude=pid)
-        )
+        # `outreach stop` can land at any point after the Run was marked running. Each pid is recorded only if the
+        # Run was not stopped meanwhile, and a process that could not be recorded is ended on the spot.
+        if _remember(db_path, run_id, caffeinate=caffeinate):
+            code = launcher.run_claude(
+                f"/outreach-run {run_dir}", config.model, lambda pid: _remember_claude(db_path, run_id, launcher, pid)
+            )
     finally:
         launcher.terminate(caffeinate)
         with closing(Store(db_path)) as store, store.transaction():
@@ -148,13 +150,22 @@ def _is_stopped(db_path: Path, run_id: int) -> bool:
         return bool(store.get_run(run_id)["status"] == "stopped")
 
 
-def _remember(db_path: Path, run_id: int, *, caffeinate: int | None = None, claude: int | None = None) -> None:
+def _remember(db_path: Path, run_id: int, *, caffeinate: int | None = None, claude: int | None = None) -> bool:
+    """Save a process id of the Run. False when `outreach stop` already ended the Run: save nothing then."""
     with closing(Store(db_path)) as store, store.transaction():
         run = store.get_run(run_id)
+        if run["status"] == "stopped":
+            return False
         store.set_run_processes(
             run_id, run["owner_pid"], caffeinate if caffeinate is not None else run["caffeinate_pid"],
             claude if claude is not None else run["claude_pid"],
         )
+    return True
+
+
+def _remember_claude(db_path: Path, run_id: int, launcher: Launcher, pid: int) -> None:
+    if not _remember(db_path, run_id, claude=pid):
+        launcher.terminate(pid)  # the stop came before Claude was recorded, so `stop` could not end it
 
 
 def _clear_dead_runs(store: Store, launcher: Launcher) -> None:

@@ -9,7 +9,7 @@ from threading import Thread
 
 import pytest
 
-from conftest import NOW, Env, prepared_inputs, write_for_all
+from conftest import NOW, Env, make_email, prepared_inputs, write_for_all
 from outreach.cli import main
 from outreach.gmail import GmailAuthError, GmailError, GmailQuotaError, GmailUncertain
 from test_gmail_drafts import attachments
@@ -231,18 +231,20 @@ def test_a_label_failure_does_not_undo_the_send_and_a_rerun_labels_without_resen
 
 
 def test_the_draft_is_refreshed_from_the_store_just_before_sending(env: Env) -> None:
-    """A resume switch that failed half way left one draft with the new attachment; the store says otherwise."""
+    """A resume switch whose Gmail sync failed half way left one stale draft; the store is the truth."""
     prepared(env, contacts=2)
     env.gmail.fail("update_draft", GmailAuthError("expired"), call=2)
     with serving(env) as page:
         assert page.post("/groups/1/resume", {"variant": "ml"}).status == 502
+        assert {attachments(env.gmail.draft(d))[0][0] for d in env.gmail.drafts} == {
+            "Resume_ML_Engineer.pdf", "Resume_Software_Engineer.pdf"}
         assert page.post("/emails/1/approve").status in (200, 303)
         assert page.post("/emails/2/approve").status in (200, 303)
         assert page.post("/confirm-send", {"emails": "2", "recipients": "2"}).status == 200
 
     assert env.send().code == 0
 
-    assert {attachments(m)[0][0] for m in env.gmail.sent_messages()} == {"Resume_Software_Engineer.pdf"}
+    assert {attachments(m)[0][0] for m in env.gmail.sent_messages()} == {"Resume_ML_Engineer.pdf"}
 
 
 def test_preparing_again_after_sending_does_not_touch_sent_emails(env: Env) -> None:
@@ -256,6 +258,80 @@ def test_preparing_again_after_sending_does_not_touch_sent_emails(env: Env) -> N
     assert statuses(env) == ["sent"]
     assert len(env.gmail.calls_to("create_draft")) == drafts_before
     assert "already" in result.out
+
+
+def test_a_missing_resume_file_fails_each_email_cleanly_and_a_rerun_sends_once_it_is_back(env: Env) -> None:
+    confirmed(env, contacts=2)
+    resume = env.root / "resumes" / "Resume_Software_Engineer.pdf"
+    contents = resume.read_bytes()
+    resume.unlink()
+
+    first = env.send()
+
+    assert first.code == 3
+    assert "Traceback" not in first.err
+    assert statuses(env) == ["failed", "failed"]  # none stuck in `sending`, and the second was still tried
+    assert first.out.count("failed:") == 2 and "Resume_Software_Engineer.pdf" in first.out
+    assert env.gmail.sent == {}
+
+    resume.write_bytes(contents)
+    second = env.send()
+
+    assert second.code == 0, second.err
+    assert statuses(env) == ["sent", "sent"]
+
+
+def test_a_draft_the_user_deleted_in_gmail_is_recreated_before_the_first_send(env: Env) -> None:
+    confirmed(env, contacts=1)
+    env.gmail.drafts.clear()
+
+    result = env.send()
+
+    assert result.code == 0, result.err
+    assert statuses(env) == ["sent"]
+    assert sent_to(env) == ["eng.0@acme.test"]
+
+
+def test_a_draft_consumed_by_a_send_whose_message_cannot_be_found_is_never_resent(env: Env) -> None:
+    """Gmail may rewrite the Message-ID on send, so the Sent search cannot confirm the first send."""
+    confirmed(env, contacts=2)
+    env.gmail.rewrite_message_ids = True
+    env.gmail.fail("send_draft", GmailUncertain("read timed out"), call=1, accepted=True)
+
+    first = env.send()
+
+    assert first.code == 3
+    assert statuses(env) == ["uncertain", "sent"]
+    assert sent_to(env) == ["eng.0@acme.test", "eng.1@acme.test"]  # one copy each: the retry sent nothing more
+    assert "check Sent in Gmail by hand" in first.out
+
+    second = env.send()
+
+    assert second.code == 3
+    assert statuses(env) == ["uncertain", "sent"]
+    assert sent_to(env) == ["eng.0@acme.test", "eng.1@acme.test"]  # still one copy each
+    assert len(env.gmail.calls_to("create_draft")) == 2  # no new draft was made for the uncertain email
+
+
+def test_preparing_again_after_sending_does_not_email_a_second_contact_at_the_same_address(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2)
+    shared = "shared@acme.test"
+    env.write_revealed([{"contact_id": ids["Eng 0"], "address": shared}])
+    env.write_emails([make_email(ids["Eng 0"], shared)])
+    assert env.prepare().code == 0
+    with serving(env) as page:
+        assert page.post("/emails/1/approve").status in (200, 303)
+        assert page.post("/confirm-send", {"emails": "1", "recipients": "1"}).status == 200
+    assert env.send().code == 0
+
+    env.write_revealed([{"contact_id": i, "address": shared} for i in ids.values()])
+    env.write_emails([make_email(i, shared) for i in ids.values()])
+    result = env.prepare()
+
+    assert result.code == 0, result.err
+    assert "same address" in result.out
+    assert env.query("SELECT status FROM contacts WHERE name = 'Eng 1'")[0]["status"] == "duplicate_address"
+    assert len(email_rows(env)) == 1
 
 
 def test_confirming_in_prepare_sends_straight_away(env: Env) -> None:

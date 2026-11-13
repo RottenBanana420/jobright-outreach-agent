@@ -1,13 +1,15 @@
 """The real Gmail adapter: the official Gmail REST API with an OAuth desktop-app token.
 
-Standard library only. This file is not covered by the automated tests (they use the in-memory fake); it is
-checked by hand against a test account before any real outreach (see the Gmail section of docs/review-handoff-files.md).
+Standard library only. The error mapping and the token file are tested against a local HTTP server
+(tests/test_gmail_api.py); the calls to Google themselves are checked by hand against a test account before
+any real outreach (see the Gmail section of docs/review-handoff-files.md).
 
 Scope: `gmail.modify`, the narrowest single scope that covers every call made here: `drafts.create/update/send`,
 `messages.list` (search Sent for the Message-ID), `messages.modify` and `labels.create/list` (the "Outreach"
 label). `gmail.compose` alone cannot list or label messages, and `gmail.labels` cannot label a message.
 
-Errors become the adapter errors in `outreach.gmail`: 401 and a rejected refresh token are auth errors, rate
+Errors become the adapter errors in `outreach.gmail`: 401 and an `invalid_grant` answer to the refresh (a
+revoked or expired sign-in) are auth errors, 404 is not-found, rate
 and daily limits are quota errors, timeouts, dropped connections and 5xx answers are uncertain (Gmail may have
 acted), any other refusal is a plain `GmailError`.
 """
@@ -34,6 +36,7 @@ from outreach.gmail import (
     DraftContent,
     GmailAuthError,
     GmailError,
+    GmailNotFound,
     GmailQuotaError,
     GmailUncertain,
     SentMessage,
@@ -67,13 +70,15 @@ def _post_form(url: str, form: dict[str, str], timeout: float) -> dict[str, Any]
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read())
     except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        if e.code in (400, 401):
-            raise GmailAuthError(f"Gmail authorization has expired or was revoked ({_oauth_error(body)}); "
-                                 f"{_REAUTH}") from None
-        raise GmailError(f"Google sign-in failed: HTTP {e.code}") from None
+        error = _oauth_error(e.read().decode(errors="replace"))
+        # Only a rejected grant (or a 401) means the sign-in is no longer good; any other 400 is a bad request.
+        if e.code == 401 or error == "invalid_grant":
+            raise GmailAuthError(f"Gmail authorization has expired or was revoked ({error}); {_REAUTH}") from None
+        raise GmailError(f"Google sign-in failed: HTTP {e.code} ({error})") from None
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise GmailUncertain(f"cannot reach Google sign-in: {e}") from None
+    except ValueError:  # not JSON
+        raise GmailError("Google sign-in answered with something unexpected") from None
     if not isinstance(data, dict):
         raise GmailError("Google sign-in answered with something unexpected")
     return data
@@ -82,7 +87,7 @@ def _post_form(url: str, form: dict[str, str], timeout: float) -> dict[str, Any]
 def _oauth_error(body: str) -> str:
     try:
         return str(json.loads(body).get("error", "unknown error"))
-    except (json.JSONDecodeError, AttributeError):
+    except (ValueError, AttributeError):
         return "unknown error"
 
 
@@ -96,15 +101,25 @@ class RealGmail:
 
     def _access_token(self) -> str:
         token = _load_json(self._token_path, "the Gmail token")
-        if float(token.get("expires_at", 0)) > time.time() + 60 and token.get("access_token"):
-            return str(token["access_token"])
-        if not token.get("refresh_token"):
-            raise GmailAuthError(f"the Gmail token has no refresh token; {_REAUTH}")
-        fresh = _post_form(TOKEN_URL, {
-            "grant_type": "refresh_token", "refresh_token": str(token["refresh_token"]),
-            "client_id": str(token["client_id"]), "client_secret": str(token["client_secret"]),
-        }, self._timeout)
-        token.update(access_token=fresh["access_token"], expires_at=time.time() + float(fresh.get("expires_in", 3600)))
+        try:
+            if float(token.get("expires_at", 0)) > time.time() + 60 and token.get("access_token"):
+                return str(token["access_token"])
+            if not token.get("refresh_token"):
+                raise GmailAuthError(f"the Gmail token has no refresh token; {_REAUTH}")
+            form = {
+                "grant_type": "refresh_token", "refresh_token": str(token["refresh_token"]),
+                "client_id": str(token["client_id"]), "client_secret": str(token["client_secret"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            raise GmailAuthError(f"the Gmail token file is incomplete or damaged; {_REAUTH}") from None
+        fresh = _post_form(TOKEN_URL, form, self._timeout)
+        if not fresh.get("access_token"):
+            raise GmailError("Google sign-in did not return an access token")
+        try:
+            expires_in = float(fresh.get("expires_in", 3600))
+        except (TypeError, ValueError):
+            expires_in = 3600.0
+        token.update(access_token=fresh["access_token"], expires_at=time.time() + expires_in)
         _save_token(self._token_path, token)
         return str(token["access_token"])
 
@@ -123,9 +138,13 @@ class RealGmail:
             raise _http_error(e.code, e.read().decode(errors="replace")) from None
         except (urllib.error.URLError, TimeoutError, http.client.HTTPException, OSError) as e:
             raise GmailUncertain(f"no answer from Gmail: {e}") from None
-        data = json.loads(raw) if raw else {}
+        try:
+            data = json.loads(raw) if raw else {}
+        except ValueError:
+            # Gmail answered 2xx with something unreadable: it may well have acted, so the caller must look.
+            raise GmailUncertain("Gmail answered with something unreadable") from None
         if not isinstance(data, dict):
-            raise GmailError("Gmail answered with something unexpected")
+            raise GmailUncertain("Gmail answered with something unexpected")
         return data
 
     # --- the adapter ------------------------------------------------------------------------
@@ -133,7 +152,7 @@ class RealGmail:
     def create_draft(self, content: DraftContent) -> str:
         reply = self._call("POST", "/upload/gmail/v1/users/me/drafts", query={"uploadType": "media"},
                            body=build_mime(content), content_type="message/rfc822")
-        return str(reply["id"])
+        return _id(reply, GmailError)
 
     def update_draft(self, draft_id: str, content: DraftContent) -> None:
         self._call("PUT", f"/upload/gmail/v1/users/me/drafts/{urllib.parse.quote(draft_id, safe='')}",
@@ -141,13 +160,15 @@ class RealGmail:
 
     def send_draft(self, draft_id: str) -> SentMessage:
         reply = self._call("POST", "/gmail/v1/users/me/drafts/send", body=json.dumps({"id": draft_id}).encode())
-        return SentMessage(str(reply["id"]))
+        return SentMessage(_id(reply, GmailUncertain))  # accepted or not, we cannot tell: look in Sent
 
     def find_sent(self, message_id: str) -> SentMessage | None:
         query = f"rfc822msgid:{message_id.strip('<>')} in:sent"
         reply = self._call("GET", "/gmail/v1/users/me/messages", query={"q": query, "maxResults": "1"})
         messages = reply.get("messages") or []
-        return SentMessage(str(messages[0]["id"])) if messages else None
+        if not messages:
+            return None
+        return SentMessage(_id(messages[0] if isinstance(messages[0], dict) else {}, GmailUncertain))
 
     def add_label(self, gmail_id: str, label: str) -> None:
         label_id = self._label_id(label)
@@ -168,6 +189,12 @@ class RealGmail:
         return str(self._call("GET", "/gmail/v1/users/me/profile").get("emailAddress", ""))
 
 
+def _id(reply: dict[str, Any], error: type[GmailError]) -> str:
+    if not reply.get("id"):
+        raise error("Gmail's answer has no id")
+    return str(reply["id"])
+
+
 def _http_error(status: int, body: str) -> GmailError:
     try:
         detail = json.loads(body).get("error", {})
@@ -177,6 +204,8 @@ def _http_error(status: int, body: str) -> GmailError:
         message, reasons = f"HTTP {status}", set()
     if status == 401 or "authError" in reasons or "insufficientPermissions" in reasons:
         return GmailAuthError(f"Gmail refused the saved authorization ({message}); {_REAUTH}")
+    if status == 404:
+        return GmailNotFound(f"Gmail could not find it ({message})")
     if status == 429 or reasons & _QUOTA_REASONS:
         return GmailQuotaError(f"Gmail limit reached ({message}); try again later")
     if status >= 500:
@@ -188,11 +217,19 @@ def _http_error(status: int, body: str) -> GmailError:
 
 
 def _save_token(path: Path, token: dict[str, Any]) -> None:
+    """Replace the token file in one step: a crash part way must not lose the refresh token it holds."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(token, f)
-    path.chmod(0o600)
+    temp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(token, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 def authorize(config: Config, timeout: float = 300.0) -> str:

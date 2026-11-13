@@ -15,6 +15,8 @@ class FakeLauncher:
         self.awake_while_claude_ran: list[bool] = []
         self.claude_exit = 0
         self.claude_hook: Callable[[], object] | None = None  # runs "inside" Claude, e.g. to call `outreach stop`
+        self.caffeinate_hook: Callable[[], object] | None = None  # runs right after caffeinate started
+        self.spawn_hook: Callable[[], object] | None = None  # runs after Claude was spawned, before `on_started`
         self._live: set[int] = set()
         self._next_pid = 5000
 
@@ -26,11 +28,15 @@ class FakeLauncher:
         pid = self._pid()
         self.awake.add(pid)
         self._live.add(pid)
+        if self.caffeinate_hook:
+            self.caffeinate_hook()
         return pid
 
     def run_claude(self, prompt: str, model: str, on_started: Callable[[int], None]) -> int:
         pid = self._pid()
         self._live.add(pid)
+        if self.spawn_hook:
+            self.spawn_hook()
         on_started(pid)
         self.prompts.append(prompt)
         self.models.append(model)

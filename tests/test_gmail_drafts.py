@@ -1,6 +1,7 @@
 """Gmail drafts: `outreach prepare` creates them, the review page keeps them in step. Fake Gmail only."""
 from __future__ import annotations
 
+import re
 from email.message import EmailMessage
 
 from conftest import NOW, TINY_PDF, Env, make_body, make_email, prepared_inputs, write_for_all
@@ -42,6 +43,18 @@ def test_each_draft_carries_its_own_message_id_recorded_in_the_store(env: Env) -
     assert ids == [r["message_id"] for r in rows]
     assert len(set(ids)) == 2
     assert all(i.startswith("<") and i.endswith("@example.test>") for i in ids)
+
+
+def test_a_sender_with_a_display_name_still_gets_a_well_formed_message_id(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1)
+    env.write_config(env.config.read_text().replace("me@example.test", "Jane Doe <me@example.test>"))
+    write_for_all(env, ids)
+
+    assert env.prepare().code == 0
+
+    [row] = env.query("SELECT message_id FROM outreach_emails")
+    assert re.fullmatch(r"<[0-9a-f]{32}@example\.test>", row["message_id"])
+    assert env.gmail.only_draft()["From"] == "Jane Doe <me@example.test>"
 
 
 def test_dry_run_creates_no_drafts_and_never_touches_gmail(env: Env) -> None:
@@ -143,17 +156,54 @@ def test_switching_the_resume_replaces_the_attachment_on_every_draft_of_the_grou
     assert all(n == [("Resume_ML_Engineer.pdf", TINY_PDF)] for n in names)
 
 
-def test_a_gmail_failure_on_edit_saves_nothing_and_says_so(env: Env) -> None:
+def test_a_gmail_failure_on_edit_keeps_the_edit_and_says_the_draft_is_behind(env: Env) -> None:
     prepared(env, contacts=1)
     env.gmail.fail("update_draft", GmailAuthError("Gmail authorization has expired"))
 
     with serving(env) as page:
-        reply = page.post("/emails/1/edit", {"subject": "Lost edit", "body": make_body("Backend Engineer")})
+        reply = page.post("/emails/1/edit", {"subject": "Kept edit", "body": make_body("Backend Engineer")})
 
     assert reply.status == 502
     assert "Gmail authorization has expired" in reply.body
-    assert email_rows(env)[0]["subject"] == "Applied for Backend Engineer"
+    assert "change is saved" in reply.body
+    assert email_rows(env)[0]["subject"] == "Kept edit"  # the Store is the truth; the sender refreshes the draft
     assert env.gmail.only_draft()["Subject"] == "Applied for Backend Engineer"
+
+
+def test_a_gmail_failure_part_way_through_a_resume_switch_keeps_every_draft_id_that_was_created(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2)
+    (env.root / "resumes" / "Resume_Software_Engineer.pdf").unlink()
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    assert env.gmail.drafts == {}  # blocked resume: no drafts yet
+    env.gmail.fail("create_draft", GmailAuthError("Gmail authorization has expired"), call=2)
+
+    with serving(env) as page:
+        assert page.post("/groups/1/resume", {"variant": "ai"}).status == 502
+
+    rows = email_rows(env)
+    assert rows[0]["resume_variant"] == "ai" and rows[1]["resume_variant"] == "ai"
+    assert [r["draft_id"] for r in rows] == list(env.gmail.drafts) + [None]  # the created draft is not orphaned
+
+    with serving(env) as page:
+        assert page.post("/groups/1/resume", {"variant": "ai"}).status in (200, 303)
+
+    assert len(env.gmail.drafts) == 2  # the retry made only the missing draft
+
+
+def test_a_draft_deleted_in_gmail_is_recreated_when_the_email_is_edited(env: Env) -> None:
+    prepared(env, contacts=1)
+    old_id = email_rows(env)[0]["draft_id"]
+    env.gmail.drafts.clear()
+
+    with serving(env) as page:
+        reply = page.post("/emails/1/edit", {"subject": "Hello again", "body": make_body("Backend Engineer")})
+
+    assert reply.status in (200, 303)
+    new_id = email_rows(env)[0]["draft_id"]
+    assert new_id != old_id
+    assert list(env.gmail.drafts) == [new_id]
+    assert env.gmail.only_draft()["Subject"] == "Hello again"
 
 
 def test_dry_run_edits_never_touch_gmail(env: Env) -> None:
