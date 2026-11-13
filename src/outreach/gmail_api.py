@@ -1,7 +1,8 @@
 """The real Gmail adapter: the official Gmail REST API with an OAuth desktop-app token.
 
 Standard library only. The error mapping and the token file are tested against a local HTTP server
-(tests/test_gmail_api.py); the calls to Google themselves are checked by hand against a test account before any real outreach (see the Gmail section of docs/review-handoff-files.md).
+(tests/test_gmail_api.py); the calls to Google themselves are checked by hand against a test account before
+any real outreach (see the Gmail section of docs/review-handoff-files.md).
 
 Scope: `gmail.modify`, the narrowest single scope that covers every call made here: `drafts.create/update/send`,
 `messages.list` (search Sent for the Message-ID), `messages.modify` and `labels.create/list` (the "Outreach"

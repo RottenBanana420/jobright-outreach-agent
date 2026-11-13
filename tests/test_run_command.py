@@ -101,6 +101,35 @@ def test_stop_ends_claude_and_caffeinate_and_marks_the_run_stopped(env: Env) -> 
     assert ("running", "stopped") in kinds
 
 
+def test_a_stop_before_claude_is_recorded_ends_the_claude_that_was_just_spawned(env: Env) -> None:
+    launcher = FakeLauncher()
+    stops: list[Result] = []
+    launcher.spawn_hook = lambda: stops.append(_cli(env, launcher, "stop"))
+
+    result = _cli(env, launcher, "start")
+
+    assert stops[0].code == 0
+    assert result.code == 0
+    assert launcher.terminated.count(5002) == 1  # Claude (the second process) was ended, not left running
+    assert not launcher.is_alive(5002) and launcher.awake == set()
+    [run] = env.query("SELECT status, owner_pid, caffeinate_pid, claude_pid FROM runs")
+    assert (run["status"], run["owner_pid"], run["caffeinate_pid"], run["claude_pid"]) == ("stopped", None, None, None)
+    assert _cli(env, FakeLauncher(), "start").code == 0  # nothing stale blocks the next start
+
+
+def test_a_stop_before_claude_is_launched_launches_nothing(env: Env) -> None:
+    launcher = FakeLauncher()
+    launcher.caffeinate_hook = lambda: _cli(env, launcher, "stop")
+
+    result = _cli(env, launcher, "start")
+
+    assert result.code == 0
+    assert launcher.prompts == []
+    assert launcher.awake == set()
+    [run] = env.query("SELECT status, owner_pid, caffeinate_pid FROM runs")
+    assert (run["status"], run["owner_pid"], run["caffeinate_pid"]) == ("stopped", None, None)
+
+
 def test_stop_without_a_run_in_progress_says_so(env: Env) -> None:
     result = _cli(env, FakeLauncher(), "stop")
 
