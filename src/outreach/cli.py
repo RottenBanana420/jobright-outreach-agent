@@ -12,9 +12,9 @@ from zoneinfo import ZoneInfo
 from outreach.config import load_config
 from outreach.errors import UserError
 from outreach.schema import load_applications
+from outreach.shortlist import build_groups
 from outreach.store import DEFAULT_PATH as DEFAULT_DB
 from outreach.store import Store
-from outreach.shortlist import build_groups
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,5 +56,6 @@ def _shortlist(args: argparse.Namespace) -> int:
     with closing(Store(args.db or DEFAULT_DB)) as store, store.transaction():
         run_id = store.get_or_create_run(args.run_dir, today)
         store.record_shortlist(run_id, groups)
-    (args.run_dir / "shortlist.json").write_text(json.dumps({"run_date": today, "total_groups": len(groups), "groups": shortlisted}, indent=2))
+    out = {"run_date": today, "total_groups": len(groups), "groups": shortlisted}
+    (args.run_dir / "shortlist.json").write_text(json.dumps(out, indent=2))
     return 0

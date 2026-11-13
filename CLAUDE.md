@@ -11,3 +11,7 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Checks
+
+Lint, typecheck and tests run as one sequence in `.github/workflows/ci.yml`. Run it with `uv run` before committing.

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 DEFAULT_PATH = Path("data/outreach.db")
 
@@ -59,11 +60,14 @@ CREATE TABLE IF NOT EXISTS events (
 """
 
 _STATUS_TABLES = {"runs", "company_groups"}
-_NOT_DETAILS = {"jobright_id", "company", "title", "applied_on", "job_closed", "agent_applied", "match_score", "hidden_score"}
+_NOT_DETAILS = {
+    "jobright_id", "company", "title", "applied_on",
+    "job_closed", "agent_applied", "match_score", "hidden_score",
+}
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class Store:

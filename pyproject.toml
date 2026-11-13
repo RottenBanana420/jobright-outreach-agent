@@ -9,7 +9,11 @@ dependencies = []
 outreach = "outreach.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "mypy>=1.10"]
+dev = [
+    "pytest>=8",
+    "mypy>=1.10",
+    "ruff>=0.17.5",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -24,3 +28,10 @@ testpaths = ["tests"]
 [tool.mypy]
 strict = true
 mypy_path = "src"
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

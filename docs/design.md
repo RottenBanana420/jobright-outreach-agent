@@ -13,7 +13,7 @@ Settled during the design interview on 2026-11-12. Terms in bold are defined in 
 ## Selecting applications
 
 - **Today's Applications** only: status Applied, Applied-on date equal to today in America/Los_Angeles.
-- Ranked by Jobright's **Match Score** alone, as shown on the Applied-list card. Closed jobs (no visible score) stay in, ranked last.
+- Ranked by Jobright's **Match Score** alone, as shown on the Applied-list card. Closed jobs (no visible score) stay in, ranked last; the hidden score the job page still carries breaks ties among them (see [milestone 2](milestone-2-extraction.md)).
 - **Shortlist** is at most 10 **Company Groups**. No approval pause on the Shortlist.
 
 ## Contacts and emails
