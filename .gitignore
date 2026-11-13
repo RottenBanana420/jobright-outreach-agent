@@ -29,6 +29,9 @@ data/
 exports/
 logs/
 
+# Personal config (sender address etc.); see outreach.example.toml
+outreach.toml
+
 # OS / editor
 .DS_Store
 .idea/
