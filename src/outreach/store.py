@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS outreach_emails (
     findings TEXT NOT NULL,
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    draft_id TEXT,
+    message_id TEXT,
+    gmail_message_id TEXT,
+    sent_at TEXT,
+    labelled INTEGER NOT NULL DEFAULT 0,
     UNIQUE (contact_id, group_id)
 );
 CREATE TABLE IF NOT EXISTS events (
@@ -124,6 +129,10 @@ class Store:
         self._con.executescript(_SCHEMA)
         self._add_missing_columns("company_groups", {"contact_cap": "INTEGER", "contacts_picked": "INTEGER"})
         self._add_missing_columns("runs", {"dry_run": "INTEGER NOT NULL DEFAULT 0"})
+        self._add_missing_columns("outreach_emails", {
+            "draft_id": "TEXT", "message_id": "TEXT", "gmail_message_id": "TEXT", "sent_at": "TEXT",
+            "labelled": "INTEGER NOT NULL DEFAULT 0",
+        })
         self._add_missing_columns("events", {"kind": "TEXT NOT NULL DEFAULT 'status'"})
         self._rename_status("outreach_emails", "drafted", "written")
 
@@ -416,6 +425,12 @@ class Store:
         self.set_status("outreach_emails", email_id, "written", "re-prepared")
         return email_id
 
+    def email_for(self, contact_id: int, group_id: int) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self._con.execute(
+            "SELECT * FROM outreach_emails WHERE contact_id = ? AND group_id = ?", (contact_id, group_id)
+        ).fetchone()
+        return row
+
     def get_email(self, email_id: int) -> sqlite3.Row | None:
         row: sqlite3.Row | None = self._con.execute(
             "SELECT * FROM outreach_emails WHERE id = ?", (email_id,)
@@ -458,3 +473,28 @@ class Store:
 
     def set_email_block(self, email_id: int, reason: str | None) -> None:
         self._con.execute("UPDATE outreach_emails SET block_reason = ? WHERE id = ?", (reason, email_id))
+
+    # --- Gmail drafts and sending (ticket #5) ------------------------------------------------
+
+    def set_draft(self, email_id: int, draft_id: str, message_id: str) -> None:
+        self._con.execute(
+            "UPDATE outreach_emails SET draft_id = ?, message_id = ? WHERE id = ?", (draft_id, message_id, email_id)
+        )
+
+    def unfinished_emails(self, run_id: int) -> list[sqlite3.Row]:
+        """Emails the sender still has to deal with: confirmed, half done (sending, uncertain, failed) or unlabelled."""
+        return [
+            r for r in self.run_emails(run_id)
+            if r["status"] in ("ready_to_send", "sending", "uncertain", "failed")
+            or (r["status"] == "sent" and not r["labelled"])
+        ]
+
+    def record_sent(self, email_id: int, gmail_message_id: str, sent_at: str) -> None:
+        """Keep the proof of a send: Gmail's message id and when. Used together with the status change to `sent`."""
+        self._con.execute(
+            "UPDATE outreach_emails SET gmail_message_id = ?, sent_at = ? WHERE id = ?",
+            (gmail_message_id, sent_at, email_id),
+        )
+
+    def set_labelled(self, email_id: int) -> None:
+        self._con.execute("UPDATE outreach_emails SET labelled = 1 WHERE id = ?", (email_id,))

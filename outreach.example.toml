@@ -4,9 +4,11 @@ shortlist_size = 10             # Company Groups per Run
 cooldown_days = 30
 timezone = "America/Los_Angeles"  # decides what "today" means for Applied-on
 resume_dir = "resumes"
-sender = ""                     # your Gmail address
+sender = ""                     # your Gmail address; required for drafts and sending
 send_pause_seconds = 30
 model = "sonnet"
+gmail_credentials = "credentials.json"  # Google Cloud OAuth client of type Desktop app (gitignored)
+gmail_token = "data/gmail_token.json"   # written by `outreach gmail-auth` (gitignored)
 humanizer_check = ""            # optional: path to the work-humanizer check script (see docs/review-handoff-files.md)
 
 # Resume Variant -> file name inside resume_dir. These are the defaults; override any of them.

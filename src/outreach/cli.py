@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from outreach.config import load_config
+from outreach.config import Config, load_config
 from outreach.contacts import pick_contacts
+from outreach.drafts import sync_run_drafts
 from outreach.emails import prepare_emails
 from outreach.errors import UserError
+from outreach.gmail import Gmail
 from outreach.schema import (
     load_applications,
     load_bounces,
@@ -21,12 +23,13 @@ from outreach.schema import (
     load_revealed_addresses,
     load_written_emails,
 )
+from outreach.send import send_run
 from outreach.shortlist import build_groups, company_key
 from outreach.store import DEFAULT_PATH as DEFAULT_DB
 from outreach.store import Store
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, gmail: Gmail | None = None) -> int:
     parser = argparse.ArgumentParser(prog="outreach")
     sub = parser.add_subparsers(dest="command", required=True)
     shortlist_cmd = sub.add_parser("shortlist", help="rank Today's Applications into a Shortlist")
@@ -51,6 +54,12 @@ def main(argv: list[str] | None = None) -> int:
     prepare_cmd.add_argument("--config", type=Path)
     prepare_cmd.add_argument("--db", type=Path)
     prepare_cmd.add_argument("--now", help="override the current time (ISO 8601)")
+    send_cmd = sub.add_parser("send", help="send the confirmed Outreach Emails (also resumes an interrupted send)")
+    send_cmd.add_argument("run_dir", type=Path)
+    send_cmd.add_argument("--config", type=Path)
+    send_cmd.add_argument("--db", type=Path)
+    auth_cmd = sub.add_parser("gmail-auth", help="sign in to Gmail once in the browser (saves a token)")
+    auth_cmd.add_argument("--config", type=Path)
     config_cmd = sub.add_parser("config", help="print the effective settings")
     config_cmd.add_argument("--config", type=Path)
     args = parser.parse_args(argv)
@@ -59,12 +68,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "config":
             print(json.dumps(load_config(args.config).as_dict(), indent=2))
             return 0
+        if args.command == "gmail-auth":
+            return _gmail_auth(args)
         if args.command == "pick-contacts":
             return _pick_contacts(args)
         if args.command == "record-bounces":
             return _record_bounces(args)
         if args.command == "prepare":
-            return _prepare(args)
+            return _prepare(args, gmail)
+        if args.command == "send":
+            return _send(args, gmail)
         return _shortlist(args)
     except (OSError, sqlite3.Error) as e:
         print(f"outreach: error: cannot read or write files: {e}", file=sys.stderr)
@@ -165,7 +178,14 @@ def _record_bounces(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prepare(args: argparse.Namespace) -> int:
+def _real_gmail(config: Config) -> Gmail:
+    from outreach.gmail_api import RealGmail
+
+    gmail: Gmail = RealGmail(config)
+    return gmail
+
+
+def _prepare(args: argparse.Namespace, gmail: Gmail | None) -> int:
     config = load_config(args.config)
     addresses = load_revealed_addresses(args.run_dir / "revealed_addresses.json")
     emails = load_written_emails(args.run_dir / "written_emails.json")
@@ -183,8 +203,50 @@ def _prepare(args: argparse.Namespace) -> int:
         print(f"not prepared: {line}")
     if done.humanizer_skipped:
         print("work-humanizer check skipped (humanizer_check is not set or not available)")
+    if not args.dry_run:
+        gmail = gmail or _real_gmail(config)
+        with closing(Store(db_path)) as store:
+            made = sync_run_drafts(store, gmail, config, run_id)
+        print(f"created or updated {made} Gmail draft(s)")
     if args.no_serve:
         return 0
     from outreach.review import serve
 
-    return serve(db_path, config, run_id, port=args.port)
+    confirmed = serve(db_path, config, run_id, port=args.port, gmail=gmail)
+    return _send_confirmed(db_path, config, run_id, gmail) if confirmed and not args.dry_run else 0
+
+
+def _send(args: argparse.Namespace, gmail: Gmail | None) -> int:
+    config = load_config(args.config)
+    db_path = args.db or DEFAULT_DB
+    with closing(Store(db_path)) as store:
+        run_id = int(_require_run(store, args.run_dir)["id"])
+    return _send_confirmed(db_path, config, run_id, gmail)
+
+
+def _send_confirmed(db_path: Path, config: Config, run_id: int, gmail: Gmail | None) -> int:
+    """Send what the user confirmed and say what went and what is left. Exit code 3: not everything went out."""
+    with closing(Store(db_path)) as store:
+        report = send_run(store, gmail or _real_gmail(config), config, run_id)
+    print(f"sent {len(report.sent)}")
+    for line in report.sent:
+        print(f"  sent: {line}")
+    for line in report.problems:
+        print(f"  {line}")
+    if report.left:
+        detail = f" ({report.not_attempted} not attempted)" if report.not_attempted else ""
+        print(f"{report.left} left{detail}; fix the cause and rerun `outreach send <run-dir>` to carry on")
+    if report.stopped:
+        print(f"outreach: error: send stopped: {report.stopped}", file=sys.stderr)
+    return 0 if report.complete else 3
+
+
+def _gmail_auth(args: argparse.Namespace) -> int:
+    from outreach.gmail_api import authorize
+
+    config = load_config(args.config)
+    address = authorize(config)
+    print(f"Gmail is connected as {address}; token saved to {config.gmail_token}")
+    if config.sender and address.lower() != config.sender.strip().lower():
+        print(f"warning: the config's sender is {config.sender}, which is not this account", file=sys.stderr)
+    return 0

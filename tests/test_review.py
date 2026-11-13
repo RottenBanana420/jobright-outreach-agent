@@ -70,7 +70,7 @@ class Page:
 @contextmanager
 def serving(env: Env) -> Iterator[Page]:
     config = load_config(env.config)
-    with closing(make_server(env.db, config, run_id=1, port=0)) as server:
+    with closing(make_server(env.db, config, run_id=1, port=0, gmail=env.gmail)) as server:
         thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         host, port = "127.0.0.1", server.server_address[1]

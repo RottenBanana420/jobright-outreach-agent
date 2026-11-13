@@ -33,6 +33,8 @@ class Config:
     send_pause_seconds: float = 30.0
     model: str = "sonnet"
     humanizer_check: str = ""  # optional path to the work-humanizer check script; empty means skip
+    gmail_credentials: str = "credentials.json"  # the Google Cloud OAuth client (Desktop app); gitignored
+    gmail_token: str = "data/gmail_token.json"  # written by `outreach gmail-auth`; gitignored
     resume_files: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_RESUME_FILES))
 
     def as_dict(self) -> dict[str, Any]:

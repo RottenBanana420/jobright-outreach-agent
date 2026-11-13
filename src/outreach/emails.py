@@ -85,8 +85,12 @@ def prepare_emails(
     claimed: dict[str, str] = {}
     groups: set[int] = set()
     for contact, address, e in plan:
-        store.set_contact_email(contact["id"], address)
         label = f"{contact['name']} ({contact['company']})"
+        existing = store.email_for(contact["id"], contact["group_id"])
+        if existing is not None and existing["status"] in LOCKED:
+            result.skipped.append(f"{label}: already {existing['status']}, left as it is")
+            continue
+        store.set_contact_email(contact["id"], address)
         if store.is_bounced(address):
             store.set_status("contacts", contact["id"], "bounced", "address bounced before")
             result.skipped.append(f"{label}: {address} bounced before, no email")
