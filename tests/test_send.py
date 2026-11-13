@@ -9,7 +9,7 @@ from threading import Thread
 
 import pytest
 
-from conftest import NOW, Env, prepared_inputs, write_for_all
+from conftest import NOW, Env, make_email, prepared_inputs, write_for_all
 from outreach.cli import main
 from outreach.gmail import GmailAuthError, GmailError, GmailQuotaError, GmailUncertain
 from test_gmail_drafts import attachments
@@ -256,6 +256,27 @@ def test_preparing_again_after_sending_does_not_touch_sent_emails(env: Env) -> N
     assert statuses(env) == ["sent"]
     assert len(env.gmail.calls_to("create_draft")) == drafts_before
     assert "already" in result.out
+
+
+def test_preparing_again_after_sending_does_not_email_a_second_contact_at_the_same_address(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2)
+    shared = "shared@acme.test"
+    env.write_revealed([{"contact_id": ids["Eng 0"], "address": shared}])
+    env.write_emails([make_email(ids["Eng 0"], shared)])
+    assert env.prepare().code == 0
+    with serving(env) as page:
+        assert page.post("/emails/1/approve").status in (200, 303)
+        assert page.post("/confirm-send", {"emails": "1", "recipients": "1"}).status == 200
+    assert env.send().code == 0
+
+    env.write_revealed([{"contact_id": i, "address": shared} for i in ids.values()])
+    env.write_emails([make_email(i, shared) for i in ids.values()])
+    result = env.prepare()
+
+    assert result.code == 0, result.err
+    assert "same address" in result.out
+    assert env.query("SELECT status FROM contacts WHERE name = 'Eng 1'")[0]["status"] == "duplicate_address"
+    assert len(email_rows(env)) == 1
 
 
 def test_confirming_in_prepare_sends_straight_away(env: Env) -> None:
