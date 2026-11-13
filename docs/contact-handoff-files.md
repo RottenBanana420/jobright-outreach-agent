@@ -65,7 +65,7 @@ Writes `picked_contacts.json`, which tells Claude whose addresses to reveal (onl
 
 ## SQLite (for the address and email steps)
 
-- `contacts`: one row per (Company Group, person), identity `linkedin_key`; `status` is `picked` or `flagged` (changed only through `Store.set_status`, with an event); also `category`, `jobright_groups`, `connection`, `position` (pick order), `cooldown_last_emailed`, `email`, `emailed_at`. Re-picking updates rows in place, so ids stay stable.
+- `contacts`: one row per (Company Group, person), identity `linkedin_key`; `status` is `picked`, `flagged` or `dropped` (changed only through `Store.set_status`, with an event); also `category`, `jobright_groups`, `connection`, `position` (pick order), `cooldown_last_emailed`, `email`, `emailed_at`. Re-picking updates rows in place, so ids stay stable. A person who left the candidates is deleted, unless they already have an Outreach Email (deleting would cascade to it): they stay with status `dropped`, out of `picked_contacts.json`, and come back as `picked` or `flagged` if they reappear.
 - `company_groups.contact_cap` and `contacts_picked`: the "N of M" figure.
 - `bounces`: `address` (lowercase), `bounced_at`, `note`.
 - Store methods the next steps use: `set_contact_email(contact_id, address)`, `mark_emailed(contact_id, iso_time)` (starts the cooldown), `is_bounced(address)` (check after revealing an address), `picked_contacts(group_id)`.

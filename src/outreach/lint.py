@@ -35,12 +35,29 @@ def _domain_matches(address: str, company: str) -> bool:
     return False
 
 
-def run_humanizer(script: str, body: str) -> list[Finding] | None:
-    """Run the optional work-humanizer check; None means it is unavailable and was skipped.
+# Lines the real check prints for every text, flagged or not: totals, not findings.
+_STATS_PREFIXES = ("words:",)
 
-    Contract (ours, since the check is external): `python <script>` gets the body on stdin and prints
-    one finding per line on stdout. A non-zero exit with output still counts; a crash with no output
-    or a script that cannot start means skipped.
+
+def _is_finding(line: str) -> bool:
+    """The check prints a "label: hits" line for each thing it flags, then stats lines even for clean text.
+
+    "sentences: ..." is a stats line unless it carries a "(uniform: ...)" note, and "words: N" never counts.
+    """
+    if line.startswith(_STATS_PREFIXES):
+        return False
+    if line.startswith("sentences:"):
+        return "(uniform" in line
+    return True
+
+
+def run_humanizer(script: str, body: str) -> list[Finding] | None:
+    """Run the optional work-humanizer check (its `check.py`); None means it is unavailable and was skipped.
+
+    How the real script behaves: `python check.py` reads the text on stdin, always exits 0 and prints
+    "label: hits" lines for what it flagged, followed by stats lines (`sentences: ...`, `words: N`) even
+    for clean text. So only finding-shaped lines count (see `_is_finding`). A non-zero exit means the
+    script crashed or could not run, so the check is skipped whatever it printed.
     """
     if not script or not Path(script).expanduser().is_file():
         return None
@@ -51,20 +68,25 @@ def run_humanizer(script: str, body: str) -> list[Finding] | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-    if not lines and proc.returncode != 0:
+    if proc.returncode != 0:
         return None
-    return [Finding("humanizer", f"work-humanizer: {ln}") for ln in lines]
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    return [Finding("humanizer", f"work-humanizer: {ln}") for ln in lines if _is_finding(ln)]
+
+
+def hard_findings(recipients: list[str]) -> list[Finding]:
+    """Errors that stop an Outreach Email being prepared at all: it must have exactly one recipient."""
+    if len(recipients) == 1:
+        return []
+    return [Finding(
+        "recipients", f"{len(recipients)} recipients; exactly one is allowed, with no CC or BCC", hard=True,
+    )]
 
 
 def lint_email(
     *, subject: str, body: str, recipients: list[str], address: str, roles: list[str], company: str,
 ) -> list[Finding]:
-    findings: list[Finding] = []
-    if len(recipients) != 1:
-        findings.append(Finding(
-            "recipients", f"{len(recipients)} recipients; exactly one is allowed, with no CC or BCC", hard=True,
-        ))
+    findings = hard_findings(recipients)
     words = len(body.split())
     if not MIN_WORDS <= words <= MAX_WORDS:
         findings.append(Finding("word_count", f"{words} words; aim for {MIN_WORDS} to {MAX_WORDS}"))

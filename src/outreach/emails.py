@@ -14,9 +14,9 @@ from typing import Any
 
 from outreach.config import Config
 from outreach.errors import Conflict, UserError
-from outreach.lint import Finding, lint_email, run_humanizer
+from outreach.lint import Finding, hard_findings, lint_email, run_humanizer
 from outreach.resume import check_resume, resume_path, variant_for
-from outreach.schema import MAX_BODY_CHARS, MAX_SUBJECT_CHARS
+from outreach.schema import body_problem, subject_problem
 from outreach.store import Store
 
 # Once an email is marked ready to send (or later) the review page can no longer change it.
@@ -74,9 +74,7 @@ def prepare_emails(
         if not address:
             raise UserError(f"emails[{i}].contact_id: Contact {e['contact_id']} ({contact['name']}) has no "
                             "revealed address; add it to revealed_addresses.json")
-        hard = [f for f in lint_email(subject=e["subject"], body=e["body"], recipients=e["recipients"],
-                                      address=address, roles=[], company="") if f.hard]
-        if hard:
+        if hard := hard_findings(e["recipients"]):
             raise UserError(f"emails[{i}]: {hard[0].message}")
         if e["recipients"][0] != address:
             raise UserError(f"emails[{i}].to: {e['recipients'][0]!r} is not the revealed address {address!r} "
@@ -131,16 +129,16 @@ def _editable(store: Store, email_id: int) -> sqlite3.Row:
 def _reopen(store: Store, row: sqlite3.Row, why: str) -> None:
     """An approved email that changed must be approved again: what is approved is what gets sent."""
     if row["status"] == "approved":
-        store.set_status("outreach_emails", row["id"], "drafted", why)
+        store.set_status("outreach_emails", row["id"], "written", why)
 
 
 def edit_email(store: Store, config: Config, email_id: int, subject: str, body: str) -> None:
     row = _editable(store, email_id)
     subject, body = subject.strip(), body.strip()
-    if not subject or "\n" in subject or "\r" in subject or len(subject) > MAX_SUBJECT_CHARS:
-        raise UserError(f"subject: must be one non-empty line of at most {MAX_SUBJECT_CHARS} characters")
-    if not body or len(body) > MAX_BODY_CHARS:
-        raise UserError(f"body: must be non-empty and at most {MAX_BODY_CHARS} characters")
+    if problem := subject_problem(subject):
+        raise UserError(f"subject: {problem}")
+    if problem := body_problem(body):
+        raise UserError(f"body: {problem}")
     group = store.get_group(row["group_id"])
     roles = [a["title"] for a in store.group_applications(row["group_id"])]
     findings, _ = _lint(config, subject=subject, body=body, address=row["address"], roles=roles, company=group["name"])
@@ -183,14 +181,16 @@ def _check_approvable(store: Store, row: sqlite3.Row) -> None:
 
 
 def bulk_approve(store: Store, run_id: int) -> tuple[int, int]:
-    """Approve every drafted email that is unblocked and has no lint findings. Returns (approved, left)."""
+    """Approve every written email whose resume is fine. Returns (approved, left).
+
+    Lint findings are warnings and do not block Approval, so they do not stop a bulk approve; a blocked
+    resume does. Emails in any other status (approved, rejected, skipped) are not touched.
+    """
     approved = left = 0
     for row in store.run_emails(run_id):
-        if row["status"] != "drafted":
+        if row["status"] != "written":
             continue
         try:
-            if json.loads(row["findings"]):
-                raise Conflict("has findings")
             _check_approvable(store, row)
         except Conflict:
             left += 1

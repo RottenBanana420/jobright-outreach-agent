@@ -180,6 +180,20 @@ MAX_BODY_CHARS = 10_000
 MAX_SUBJECT_CHARS = 200
 
 
+def subject_problem(subject: str) -> str | None:
+    """Why this cannot be an Outreach Email subject (one non-empty line, bounded), or None."""
+    if not subject.strip() or "\n" in subject or "\r" in subject or len(subject) > MAX_SUBJECT_CHARS:
+        return f"must be one non-empty line of at most {MAX_SUBJECT_CHARS} characters"
+    return None
+
+
+def body_problem(body: str) -> str | None:
+    """Why this cannot be an Outreach Email body (non-empty, bounded), or None."""
+    if not body.strip() or len(body) > MAX_BODY_CHARS:
+        return f"must be non-empty and at most {MAX_BODY_CHARS} characters"
+    return None
+
+
 def _recipient_list(value: Any, path: str, required: bool) -> list[str]:
     if value is None and not required:
         return []
@@ -211,11 +225,11 @@ def load_written_emails(path: Path) -> list[dict[str, Any]]:
         extra = _recipient_list(item.get("cc"), f"{where}.cc", False) + _recipient_list(
             item.get("bcc"), f"{where}.bcc", False)
         subject = _text(item.get("subject"), f"{where}.subject")
-        if "\n" in subject or "\r" in subject or len(subject) > MAX_SUBJECT_CHARS:
-            raise _fail(f"{where}.subject", f"must be one line of at most {MAX_SUBJECT_CHARS} characters")
+        if problem := subject_problem(subject):
+            raise _fail(f"{where}.subject", problem)
         body = _text(item.get("body"), f"{where}.body")
-        if len(body) > MAX_BODY_CHARS:
-            raise _fail(f"{where}.body", f"must be at most {MAX_BODY_CHARS} characters")
+        if problem := body_problem(body):
+            raise _fail(f"{where}.body", problem)
         out.append({"contact_id": contact_id, "recipients": to + extra, "subject": subject, "body": body})
     return out
 

@@ -123,7 +123,8 @@ def test_the_page_shows_company_roles_score_rank_and_contacts(env: Env) -> None:
 
     for text in ["Acme", "Backend Engineer", "Data Engineer", "91", "Rank 1", "Rae Recruiter", "Technical Recruiter",
                  "Recruiter", "school", "Example University", "https://www.linkedin.com/in/rae-recruiter",
-                 "rae.recruiter@acme.test", "unverified", "2 of 5", "drafted", VARIANT_FILES["software"]]:
+                 "rae.recruiter@acme.test", "Unverified Address", "found this from public information",
+                 "may be wrong", "2 of 5", "written", VARIANT_FILES["software"]]:
         assert text in html, text
 
 
@@ -176,7 +177,7 @@ def test_hostile_content_is_escaped_not_executed(env: Env) -> None:
     assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
     assert 'href="javascript:' not in html
     # Instructions in the text change nothing: no email was approved by showing them.
-    assert statuses(env) == ["drafted"]
+    assert statuses(env) == ["written"]
 
 
 def test_a_request_with_a_foreign_host_header_is_refused(env: Env) -> None:
@@ -203,7 +204,7 @@ def test_a_post_without_the_page_token_is_refused(env: Env) -> None:
         no_token = page.post("/emails/1/approve", token="")
     assert reply.status == 403
     assert no_token.status == 403
-    assert statuses(env) == ["drafted", "drafted"]
+    assert statuses(env) == ["written", "written"]
 
 
 def test_a_cross_origin_post_is_refused(env: Env) -> None:
@@ -211,7 +212,7 @@ def test_a_cross_origin_post_is_refused(env: Env) -> None:
     with serving(env) as page:
         reply = page.post("/emails/1/approve", headers={"Origin": "http://evil.example"})
     assert reply.status == 403
-    assert statuses(env) == ["drafted", "drafted"]
+    assert statuses(env) == ["written", "written"]
 
 
 def test_approve_reject_and_skip_persist_with_audit_events(env: Env) -> None:
@@ -281,7 +282,7 @@ def test_editing_an_approved_email_sends_it_back_to_review(env: Env) -> None:
     with serving(env) as page:
         page.post("/emails/1/approve")
         page.post("/emails/1/edit", {"subject": "Changed", "body": make_body()})
-    assert statuses(env) == ["drafted"]
+    assert statuses(env) == ["written"]
 
 
 def test_switching_the_resume_updates_the_whole_company_group(env: Env) -> None:
@@ -326,7 +327,7 @@ def test_an_email_with_a_bad_resume_cannot_be_approved(env: Env) -> None:
         reply = page.post("/emails/1/approve")
     assert reply.status == 409
     assert "does not exist" in reply.body
-    assert statuses(env) == ["drafted"]
+    assert statuses(env) == ["written"]
 
 
 def test_a_resume_that_breaks_after_prepare_blocks_approval_too(env: Env) -> None:
@@ -334,22 +335,41 @@ def test_a_resume_that_breaks_after_prepare_blocks_approval_too(env: Env) -> Non
     (env.root / "resumes" / VARIANT_FILES["software"]).write_bytes(b"oops")
     with serving(env) as page:
         assert page.post("/emails/1/approve").status == 409
-    assert statuses(env) == ["drafted"]
+    assert statuses(env) == ["written"]
 
 
-def test_bulk_approve_approves_clean_emails_and_leaves_flagged_ones(env: Env) -> None:
+def test_bulk_approve_approves_emails_with_findings(env: Env) -> None:
+    """Findings are shown, but they do not block Approval; only hard errors and a blocked resume do."""
     ids = prepared_inputs(env, contacts=3)
     write_for_all(env, ids)
     bad = json.loads((env.run_dir / "written_emails.json").read_text())
     bad["emails"][1]["body"] = "Too short."
     (env.run_dir / "written_emails.json").write_text(json.dumps(bad))
     assert env.prepare().code == 0
+    assert json.loads(email_rows(env)[1]["findings"])
 
     with serving(env) as page:
-        reply = page.post("/bulk-approve")
+        reply = page.post("/bulk-approve")  # follows the redirect to the page with its notice
 
-    assert reply.status in (200, 303)
-    assert statuses(env) == ["approved", "drafted", "approved"]
+    assert reply.status == 200
+    assert statuses(env) == ["approved", "approved", "approved"]
+    assert "Bulk approved 3 email(s); 0 left" in reply.body
+
+
+def test_bulk_approve_leaves_emails_with_a_blocked_resume_and_says_so(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2)
+    (env.root / "resumes" / VARIANT_FILES["software"]).unlink()
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+
+    with serving(env) as page:
+        before = page.get().body
+        after = page.post("/bulk-approve").body
+
+    assert statuses(env) == ["written", "written"]
+    assert "2 waiting for review, 2 with a blocked resume" in before
+    assert "Bulk approved 0 email(s); 2 left" in after
+    assert "blocked resume" in after
 
 
 def test_bulk_approve_does_not_resurrect_rejected_emails(env: Env) -> None:
@@ -381,15 +401,15 @@ def test_confirm_send_requires_the_shown_totals_and_marks_only_approved_emails(e
         wrong = page.post("/confirm-send", {"emails": "4", "recipients": "4"})
         wrong_recipients = page.post("/confirm-send", {"emails": "2", "recipients": "1"})
         garbage = page.post("/confirm-send", {"emails": "two", "recipients": "2"})
-        assert statuses(env) == ["approved", "approved", "rejected", "drafted"]
+        assert statuses(env) == ["approved", "approved", "rejected", "written"]
         ok = page.post("/confirm-send", {"emails": "2", "recipients": "2"})
 
     assert (wrong.status, wrong_recipients.status, garbage.status) == (409, 409, 400)
     assert "2 email(s) to 2 recipient(s)" in wrong.body
     assert ok.status in (200, 303)
-    assert statuses(env) == ["ready_to_send", "ready_to_send", "rejected", "drafted"]
+    assert statuses(env) == ["ready_to_send", "ready_to_send", "rejected", "written"]
     history = env.query("SELECT to_status FROM events WHERE entity = 'outreach_emails' AND entity_id = 1 ORDER BY id")
-    assert [e["to_status"] for e in history] == ["drafted", "approved", "ready_to_send"]
+    assert [e["to_status"] for e in history] == ["written", "approved", "ready_to_send"]
 
 
 def test_confirm_send_with_nothing_approved_is_refused(env: Env) -> None:
@@ -397,7 +417,7 @@ def test_confirm_send_with_nothing_approved_is_refused(env: Env) -> None:
     with serving(env) as page:
         reply = page.post("/confirm-send", {"emails": "0", "recipients": "0"})
     assert reply.status == 409
-    assert statuses(env) == ["drafted"]
+    assert statuses(env) == ["written"]
 
 
 def test_a_confirmed_email_can_no_longer_be_changed(env: Env) -> None:
@@ -486,3 +506,68 @@ def test_prepare_serves_the_review_page_until_the_final_confirmation(env: Env) -
     thread.join(timeout=5)
     assert outcome == [0]
     assert statuses(env) == ["approved"]  # dry run: confirmed, never marked for sending
+
+
+def two_companies(env: Env) -> None:
+    """Acme with two picked Contacts and Globex with one; resumes on disk."""
+    write_resumes(env.root / "resumes")
+    env.write_config(resume_config(env.root / "resumes"))
+    env.write_apps([make_app("Acme", "Backend Engineer", 90), make_app("Globex", "Data Engineer", 80)])
+    assert env.shortlist().code == 0
+    env.write_candidates({
+        "Acme": [make_contact(f"Eng {i}") for i in range(2)],
+        "Globex": [make_contact("Gil Globex", company="Globex")],
+    })
+    assert env.pick_contacts().code == 0
+
+
+def test_a_company_group_with_no_emails_is_listed_with_its_shortfall(env: Env) -> None:
+    two_companies(env)
+    ids = env.contact_ids("Acme")
+    write_for_all(env, ids)
+    con = sqlite3.connect(env.db)
+    con.execute("UPDATE contacts SET status = 'flagged', cooldown_last_emailed = '2026-11-02T13:00:00-08:00'"
+                " WHERE name = 'Gil Globex'")
+    con.execute("UPDATE company_groups SET contacts_picked = 0 WHERE name = 'Globex'")
+    con.commit()
+    con.close()
+    assert env.prepare().code == 0
+
+    with serving(env) as page:
+        html = page.get().body
+
+    globex = html[html.index('id="group-2"'):]
+    assert "Globex" in globex
+    assert "Rank 2" in globex
+    assert "Data Engineer" in globex
+    assert "0 of 4" in globex
+    assert "no Outreach Emails" in globex
+    assert "Gil Globex" in globex
+    assert "emailed within the cooldown window" in globex
+    assert "2026-11-02" in globex
+
+
+def test_flagged_contacts_are_listed_with_the_reason_and_escaped(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=3)
+    hostile = "<b>Eng 2</b>"
+    con = sqlite3.connect(env.db)
+    con.execute("UPDATE contacts SET name = ? WHERE name = 'Eng 2'", (hostile,))
+    con.commit()
+    con.close()
+    env.write_revealed([
+        {"contact_id": ids["Eng 0"], "address": "eng.0@acme.test"},
+        {"contact_id": ids["Eng 1"], "address": "shared@acme.test"},
+        {"contact_id": ids["Eng 2"], "address": "SHARED@acme.test"},
+    ])
+    env.write_emails([make_email(ids["Eng 0"], "eng.0@acme.test"), make_email(ids["Eng 1"], "shared@acme.test"),
+                      make_email(ids["Eng 2"], "shared@acme.test")])
+    env.write_bounces([{"address": "eng.0@acme.test"}])
+    assert env.record_bounces().code == 0
+    assert env.prepare().code == 0
+
+    with serving(env) as page:
+        html = page.get().body
+
+    assert "Eng 0" in html and "address bounced before" in html
+    assert "&lt;b&gt;Eng 2&lt;/b&gt;" in html and "<b>Eng 2</b>" not in html
+    assert "same address as another Contact" in html

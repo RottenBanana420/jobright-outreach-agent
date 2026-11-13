@@ -79,6 +79,13 @@ def _now(args: argparse.Namespace, zone: ZoneInfo) -> datetime:
     return now if now.tzinfo else now.replace(tzinfo=zone)
 
 
+def _require_run(store: Store, run_dir: Path) -> sqlite3.Row:
+    run = store.find_run(run_dir)
+    if run is None:
+        raise UserError(f"{run_dir}: no Shortlist recorded for this Run; run `outreach shortlist` first")
+    return run
+
+
 def _shortlist(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     apps = load_applications(args.run_dir / "applications.json")
@@ -104,9 +111,7 @@ def _pick_contacts(args: argparse.Namespace) -> int:
     zone = ZoneInfo(config.timezone)
     now = _now(args, zone)
     with closing(Store(args.db or DEFAULT_DB)) as store, store.transaction():
-        run = store.find_run(args.run_dir)
-        if run is None:
-            raise UserError(f"{args.run_dir}: no Shortlist recorded for this Run; run `outreach shortlist` first")
+        run = _require_run(store, args.run_dir)
         groups = store.shortlisted_groups(run["id"])
         by_key = {g["key"]: g for g in groups}
         candidates: dict[str, list[dict[str, Any]]] = {}
@@ -166,9 +171,7 @@ def _prepare(args: argparse.Namespace) -> int:
     emails = load_written_emails(args.run_dir / "written_emails.json")
     db_path = args.db or DEFAULT_DB
     with closing(Store(db_path)) as store, store.transaction():
-        run = store.find_run(args.run_dir)
-        if run is None:
-            raise UserError(f"{args.run_dir}: no Shortlist recorded for this Run; run `outreach shortlist` first")
+        run = _require_run(store, args.run_dir)
         store.set_run_dry_run(run["id"], args.dry_run)
         done = prepare_emails(store, config, run["id"], addresses, emails)
         run_id = int(run["id"])
