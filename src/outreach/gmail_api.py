@@ -34,6 +34,7 @@ from outreach.gmail import (
     DraftContent,
     GmailAuthError,
     GmailError,
+    GmailNotFound,
     GmailQuotaError,
     GmailUncertain,
     SentMessage,
@@ -177,6 +178,8 @@ def _http_error(status: int, body: str) -> GmailError:
         message, reasons = f"HTTP {status}", set()
     if status == 401 or "authError" in reasons or "insufficientPermissions" in reasons:
         return GmailAuthError(f"Gmail refused the saved authorization ({message}); {_REAUTH}")
+    if status == 404:
+        return GmailNotFound(f"Gmail could not find it ({message})")
     if status == 429 or reasons & _QUOTA_REASONS:
         return GmailQuotaError(f"Gmail limit reached ({message}); try again later")
     if status >= 500:

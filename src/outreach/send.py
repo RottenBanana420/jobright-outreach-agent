@@ -8,7 +8,12 @@ Safety rules, all enforced here and not on the review page:
   searched for its Message-ID; found means sent, and nothing is sent twice.
 - An auth or quota error stops the batch. Whatever was not sent stays confirmed, and a rerun carries on.
 - Each status is saved before and after the Gmail call, so a crash leaves `sending`, which a rerun treats as
-  uncertain.
+  uncertain. `sending` is set only once the draft is ready, so a problem before that (a resume file that was
+  moved, Gmail unreachable) is a plain `failed` for that email.
+- A draft that is gone from Gmail after an earlier attempt may have consumed it is never recreated and sent
+  again: the email is left `uncertain` for the user to check Sent by hand. The Sent search relies on Gmail
+  keeping our Message-ID, which is checked by hand (docs/review-handoff-files.md); this rule keeps a rewritten
+  Message-ID from causing a second send.
 """
 from __future__ import annotations
 
@@ -22,7 +27,15 @@ from typing import NoReturn
 from outreach.config import Config
 from outreach.drafts import refresh_draft
 from outreach.errors import UserError
-from outreach.gmail import LABEL, Gmail, GmailAuthError, GmailError, GmailQuotaError, GmailUncertain
+from outreach.gmail import (
+    LABEL,
+    Gmail,
+    GmailAuthError,
+    GmailError,
+    GmailNotFound,
+    GmailQuotaError,
+    GmailUncertain,
+)
 from outreach.store import Store
 
 
@@ -89,7 +102,7 @@ def _stop(report: SendReport, why: object) -> NoReturn:
     raise _Stop
 
 
-def _fail(store: Store, row: sqlite3.Row, report: SendReport, error: GmailError) -> None:
+def _fail(store: Store, row: sqlite3.Row, report: SendReport, error: Exception) -> None:
     """Gmail refused, so nothing went out. Rerunning tries the email again (after looking in Sent)."""
     _set(store, row["id"], "failed", str(error))
     report.problems.append(f"failed: {_label(row)}: {error}")
@@ -132,16 +145,19 @@ def _send_one(store: Store, gmail: Gmail, config: Config, row: sqlite3.Row, repo
         if found:
             _mark_sent(store, gmail, row, found.gmail_id, report)
             return False
-    _set(store, row["id"], "sending", "sending now")
     try:
-        with store.transaction():
-            draft_id = refresh_draft(store, gmail, config, row["id"])
+        # A draft that is gone may have been consumed by an earlier attempt: only a never-attempted email gets a new one.
+        draft_id = refresh_draft(store, gmail, config, row["id"], recreate=row["status"] == "ready_to_send")
+    except GmailNotFound:
+        _check_by_hand(store, row, report)
+        return True
     except (GmailUncertain, GmailAuthError, GmailQuotaError) as e:  # nothing was sent, but Gmail is not reachable
         _fail(store, row, report, e)
         _stop(report, e)
-    except GmailError as e:
+    except (GmailError, OSError) as e:  # e.g. the resume file was moved: this email fails, the batch carries on
         _fail(store, row, report, e)
         return True
+    _set(store, row["id"], "sending", "sending now")
     try:
         message = gmail.send_draft(draft_id)
     except (GmailAuthError, GmailQuotaError) as e:
@@ -150,11 +166,21 @@ def _send_one(store: Store, gmail: Gmail, config: Config, row: sqlite3.Row, repo
     except GmailUncertain as e:
         _set(store, row["id"], "uncertain", str(e))
         _settle_uncertain(store, gmail, row, draft_id, report)
+    except GmailNotFound:
+        _check_by_hand(store, row, report)
     except GmailError as e:
         _fail(store, row, report, e)
     else:
         _mark_sent(store, gmail, row, message.gmail_id, report)
     return True
+
+
+def _check_by_hand(store: Store, row: sqlite3.Row, report: SendReport) -> None:
+    """The draft is gone and Sent has no message with our Message-ID. It may have gone out, so never send again."""
+    why = ("its Gmail draft is gone and no message with its Message-ID is in Sent; it may have been sent. "
+           "check Sent in Gmail by hand before sending it again")
+    _set(store, row["id"], "uncertain", why)
+    report.problems.append(f"uncertain: {_label(row)}: {why}")
 
 
 def _settle_uncertain(store: Store, gmail: Gmail, row: sqlite3.Row, draft_id: str, report: SendReport) -> None:
@@ -180,6 +206,8 @@ def _settle_uncertain(store: Store, gmail: Gmail, row: sqlite3.Row, draft_id: st
             _mark_sent(store, gmail, row, gmail_id, report)
             return
         _give_up(store, row, report, f"no answer from Gmail and not in Sent: {e}")
+    except GmailNotFound:
+        _check_by_hand(store, row, report)
     except GmailError as e:
         _fail(store, row, report, e)
     else:

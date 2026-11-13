@@ -167,10 +167,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = urllib.parse.urlsplit(self.path).path
         try:
-            with closing(Store(self.server.db_path)) as store, store.transaction():
-                location = self._act(store, path, form)
+            with closing(Store(self.server.db_path)) as store:
+                with store.transaction():
+                    location, to_sync = self._act(store, path, form)
+                self._sync_drafts(store, to_sync)  # after the commit: no Gmail call holds the database lock
         except GmailError as e:
-            self._page(502, "Gmail problem", f"{e} (nothing was saved)")
+            self._page(502, "Gmail problem", f"{e} (your change is saved; the Gmail draft is brought up to date "
+                                           "from it right before sending)")
         except Conflict as e:
             self._page(409, "Not allowed", str(e))
         except UserError as e:
@@ -192,7 +195,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(303, "", location=location)
 
     def _sync_drafts(self, store: Store, email_ids: list[int]) -> None:
-        """Copy a change to the Gmail drafts. A Gmail failure raises, which rolls the change back."""
+        """Copy a saved change to the Gmail drafts, outside any transaction.
+
+        The Store is the truth, so a Gmail failure raises but does not undo the change; each draft id that
+        was created before the failure is already saved, and the sender refreshes every draft before sending.
+        """
         if store.get_run(self.server.run_id)["dry_run"]:
             return  # dry run: no drafts exist
         if self.server.gmail is None:
@@ -200,7 +207,8 @@ class _Handler(BaseHTTPRequestHandler):
         for email_id in email_ids:
             drafts.sync_draft(store, self.server.gmail, self.server.config, email_id)
 
-    def _act(self, store: Store, path: str, form: dict[str, str]) -> str | None:
+    def _act(self, store: Store, path: str, form: dict[str, str]) -> tuple[str | None, list[int]]:
+        """Do the change in the open transaction. Returns where to go next and the emails whose draft needs syncing."""
         run_id, config = self.server.run_id, self.server.config
         if m := re.fullmatch(r"/emails/(\d+)/(edit|approve|reject|skip)", path):
             email_id, action = int(m.group(1)), m.group(2)
@@ -209,28 +217,27 @@ class _Handler(BaseHTTPRequestHandler):
                 raise LookupError(f"Outreach Email {email_id} does not exist")
             if action == "edit":
                 emails.edit_email(store, config, email_id, form.get("subject", ""), form.get("body", ""))
-                self._sync_drafts(store, [email_id])
-                return f"/?notice=edited#email-{email_id}"
+                return f"/?notice=edited#email-{email_id}", [email_id]
             emails.decide(store, email_id, {"approve": "approved", "reject": "rejected", "skip": "skipped"}[action])
-            return f"/?notice=decided#email-{email_id}"
+            return f"/?notice=decided#email-{email_id}", []
         if m := re.fullmatch(r"/groups/(\d+)/resume", path):
             group = store.get_group(int(m.group(1)))
             if group["run_id"] != run_id:
                 raise LookupError(f"Company Group {group['id']} does not exist")
             emails.switch_resume(store, config, int(group["id"]), form.get("variant", ""))
-            self._sync_drafts(store, [int(r["id"]) for r in store.run_emails_for_group(int(group["id"]))])
-            return f"/?notice=resume#group-{group['id']}"
+            sync = [int(r["id"]) for r in store.run_emails_for_group(int(group["id"]))]
+            return f"/?notice=resume#group-{group['id']}", sync
         if path == "/bulk-approve":
             approved, left = emails.bulk_approve(store, run_id)
-            return f"/?notice=bulk&n={approved}&left={left}"
+            return f"/?notice=bulk&n={approved}&left={left}", []
         if path == "/confirm-send":
             for name in ("emails", "recipients"):
                 if not form.get(name, "").strip().isdigit():
                     raise UserError(f"{name}: type the number shown on the page")
             emails.confirm_send(store, run_id, int(form["emails"]), int(form["recipients"]))
             self.server.confirmed = True
-            return "/?notice=dryrun" if store.get_run(run_id)["dry_run"] else "/?notice=confirmed"
-        return None
+            return ("/?notice=dryrun" if store.get_run(run_id)["dry_run"] else "/?notice=confirmed"), []
+        return None, []
 
 
 def _int(text: str) -> int:

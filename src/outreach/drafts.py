@@ -11,7 +11,7 @@ from pathlib import Path
 from outreach.config import Config
 from outreach.emails import LOCKED
 from outreach.errors import UserError
-from outreach.gmail import DraftContent, Gmail, new_message_id
+from outreach.gmail import DraftContent, Gmail, GmailNotFound, new_message_id
 from outreach.store import Store
 
 
@@ -47,15 +47,26 @@ def _email(store: Store, email_id: int) -> sqlite3.Row:
     return row
 
 
-def refresh_draft(store: Store, gmail: Gmail, config: Config, email_id: int) -> str:
-    """Make the Gmail draft equal to the Store, whatever the email's status (the sender uses this too)."""
+def refresh_draft(store: Store, gmail: Gmail, config: Config, email_id: int, *, recreate: bool = True) -> str:
+    """Make the Gmail draft equal to the Store, whatever the email's status (the sender uses this too).
+
+    Gmail is called outside any database transaction; the draft id is saved in its own as soon as Gmail returns
+    it. When the draft no longer exists in Gmail (the user deleted it) a new one is made, with a new Message-ID.
+    The sender passes `recreate=False` once an earlier send attempt may have consumed the draft: a missing
+    draft then raises `GmailNotFound` instead of being made again, because making it again could send twice.
+    """
     row = _email(store, email_id)
     if row["draft_id"]:
         draft_id = str(row["draft_id"])
-        gmail.update_draft(draft_id, draft_content(config, row, row["message_id"]))
-    else:
-        message_id = new_message_id(require_sender(config))
-        draft_id = gmail.create_draft(draft_content(config, row, message_id))
+        try:
+            gmail.update_draft(draft_id, draft_content(config, row, row["message_id"]))
+            return draft_id
+        except GmailNotFound:
+            if not recreate:
+                raise
+    message_id = new_message_id(require_sender(config))
+    draft_id = gmail.create_draft(draft_content(config, row, message_id))
+    with store.transaction():
         store.set_draft(email_id, draft_id, message_id)
     return draft_id
 
@@ -66,6 +77,5 @@ def sync_run_drafts(store: Store, gmail: Gmail, config: Config, run_id: int) -> 
     require_sender(config)
     made = 0
     for row in store.run_emails(run_id):
-        with store.transaction():
-            made += sync_draft(store, gmail, config, row["id"])
+        made += sync_draft(store, gmail, config, row["id"])
     return made

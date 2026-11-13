@@ -8,6 +8,8 @@ Error classes tell the sender what it may do next:
 
 - `GmailAuthError`, `GmailQuotaError`: Gmail refused the call, so nothing was sent. Stop the batch.
 - `GmailUncertain`: a timeout or network drop. Gmail may or may not have acted; look in Sent before retrying.
+- `GmailNotFound`: the draft is gone. Either the user deleted it or a send already consumed it, so the sender
+  never recreates and resends it on its own once an earlier attempt may have gone out.
 - `GmailError`: any other refusal. Nothing was sent.
 """
 from __future__ import annotations
@@ -38,6 +40,10 @@ class GmailQuotaError(GmailError):
 
 class GmailUncertain(GmailError):  # noqa: N818
     """A timeout or network error: Gmail may have acted on the call anyway."""
+
+
+class GmailNotFound(GmailError):
+    """The draft (or message) does not exist in Gmail: deleted by the user, or already sent."""
 
 
 @dataclass(frozen=True)
