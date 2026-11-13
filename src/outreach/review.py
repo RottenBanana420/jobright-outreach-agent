@@ -16,6 +16,7 @@ import re
 import secrets
 import sqlite3
 import urllib.parse
+from collections.abc import Callable
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -76,10 +77,17 @@ def make_server(db_path: Path, config: Config, run_id: int, port: int = 0, gmail
     return ReviewServer(db_path, config, run_id, port, gmail)
 
 
-def serve(db_path: Path, config: Config, run_id: int, port: int = 0, gmail: Gmail | None = None) -> bool:
-    """Serve the review page until the final confirmation (or Ctrl-C). Returns whether the user confirmed."""
+def serve(db_path: Path, config: Config, run_id: int, port: int = 0, gmail: Gmail | None = None,
+          on_ready: Callable[[str], None] | None = None) -> bool:
+    """Serve the review page until the final confirmation (or Ctrl-C). `on_ready` gets the page's URL.
+
+    Returns whether the user confirmed.
+    """
     server = make_server(db_path, config, run_id, port, gmail)
-    print(f"review page ready: http://{server.authority}/  (Ctrl-C to stop)", flush=True)
+    url = f"http://{server.authority}/"
+    print(f"review page ready: {url}  (Ctrl-C to stop)", flush=True)
+    if on_ready:
+        on_ready(url)
     server.timeout = 0.5
     try:
         while not server.confirmed:
