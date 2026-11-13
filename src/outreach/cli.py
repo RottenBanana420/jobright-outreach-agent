@@ -12,8 +12,15 @@ from zoneinfo import ZoneInfo
 
 from outreach.config import load_config
 from outreach.contacts import pick_contacts
+from outreach.emails import prepare_emails
 from outreach.errors import UserError
-from outreach.schema import load_applications, load_bounces, load_contact_candidates
+from outreach.schema import (
+    load_applications,
+    load_bounces,
+    load_contact_candidates,
+    load_revealed_addresses,
+    load_written_emails,
+)
 from outreach.shortlist import build_groups, company_key
 from outreach.store import DEFAULT_PATH as DEFAULT_DB
 from outreach.store import Store
@@ -36,6 +43,14 @@ def main(argv: list[str] | None = None) -> int:
     bounces_cmd = sub.add_parser("record-bounces", help="store bounced addresses so they are never used again")
     bounces_cmd.add_argument("run_dir", type=Path)
     bounces_cmd.add_argument("--db", type=Path)
+    prepare_cmd = sub.add_parser("prepare", help="lint the written emails, choose resumes and start the review page")
+    prepare_cmd.add_argument("run_dir", type=Path)
+    prepare_cmd.add_argument("--dry-run", action="store_true", help="no Gmail drafts and nothing can be sent")
+    prepare_cmd.add_argument("--port", type=int, default=0, help="review page port on 127.0.0.1 (default: free)")
+    prepare_cmd.add_argument("--no-serve", action="store_true", help="prepare the emails and exit without the page")
+    prepare_cmd.add_argument("--config", type=Path)
+    prepare_cmd.add_argument("--db", type=Path)
+    prepare_cmd.add_argument("--now", help="override the current time (ISO 8601)")
     config_cmd = sub.add_parser("config", help="print the effective settings")
     config_cmd.add_argument("--config", type=Path)
     args = parser.parse_args(argv)
@@ -48,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             return _pick_contacts(args)
         if args.command == "record-bounces":
             return _record_bounces(args)
+        if args.command == "prepare":
+            return _prepare(args)
         return _shortlist(args)
     except (OSError, sqlite3.Error) as e:
         print(f"outreach: error: cannot read or write files: {e}", file=sys.stderr)
@@ -141,3 +158,30 @@ def _record_bounces(args: argparse.Namespace) -> int:
         store.add_bounces(bounces, datetime.now(UTC).date().isoformat())
     print(f"recorded {len(bounces)} bounced address(es)")
     return 0
+
+
+def _prepare(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    addresses = load_revealed_addresses(args.run_dir / "revealed_addresses.json")
+    emails = load_written_emails(args.run_dir / "written_emails.json")
+    db_path = args.db or DEFAULT_DB
+    with closing(Store(db_path)) as store, store.transaction():
+        run = store.find_run(args.run_dir)
+        if run is None:
+            raise UserError(f"{args.run_dir}: no Shortlist recorded for this Run; run `outreach shortlist` first")
+        store.set_run_dry_run(run["id"], args.dry_run)
+        done = prepare_emails(store, config, run["id"], addresses, emails)
+        run_id = int(run["id"])
+    mode = " (dry run: no Gmail drafts, nothing can be sent)" if args.dry_run else ""
+    print(f"prepared {done.emails} Outreach Email(s) for {done.groups} Company Group(s){mode}")
+    if done.blocked:
+        print(f"{done.blocked} email(s) blocked by a bad resume; see the review page")
+    for line in done.skipped:
+        print(f"not prepared: {line}")
+    if done.humanizer_skipped:
+        print("work-humanizer check skipped (humanizer_check is not set or not available)")
+    if args.no_serve:
+        return 0
+    from outreach.review import serve
+
+    return serve(db_path, config, run_id, port=args.port)

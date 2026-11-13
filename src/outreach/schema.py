@@ -143,6 +143,83 @@ def load_contact_candidates(path: Path) -> list[dict[str, Any]]:
     return companies
 
 
+def _address(value: Any, path: str) -> str:
+    address = _text(value, path).lower()
+    local, _, domain = address.partition("@")
+    if not local or "." not in domain or any(c.isspace() or c in "@<>,;" for c in local + domain):
+        raise _fail(path, f"must be an email address, got {address!r}")
+    return address
+
+
+def _contact_id(value: Any, path: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise _fail(path, f"must be a Contact id from picked_contacts.json, got {value!r}")
+    return value
+
+
+def load_revealed_addresses(path: Path) -> list[dict[str, Any]]:
+    """Read `revealed_addresses.json`: one address per picked Contact, by Contact id."""
+    raw = _read_json(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("addresses"), list):
+        raise _fail("addresses", "must be a list at the top level of the file")
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for i, item in enumerate(raw["addresses"]):
+        where = f"addresses[{i}]"
+        if not isinstance(item, dict):
+            raise _fail(where, "must be an object")
+        contact_id = _contact_id(item.get("contact_id"), f"{where}.contact_id")
+        if contact_id in seen:
+            raise _fail(f"{where}.contact_id", f"duplicate Contact id {contact_id}")
+        seen.add(contact_id)
+        out.append({"contact_id": contact_id, "address": _address(item.get("address"), f"{where}.address")})
+    return out
+
+
+MAX_BODY_CHARS = 10_000
+MAX_SUBJECT_CHARS = 200
+
+
+def _recipient_list(value: Any, path: str, required: bool) -> list[str]:
+    if value is None and not required:
+        return []
+    if not isinstance(value, list) or (required and not value):
+        raise _fail(path, "must be a list with at least one address")
+    return [_address(item, f"{path}[{i}]") for i, item in enumerate(value)]
+
+
+def load_written_emails(path: Path) -> list[dict[str, Any]]:
+    """Read `written_emails.json`: one Outreach Email per Contact id.
+
+    `recipients` combines to, cc and bcc so the linter can reject more than one. The text is
+    untrusted: it is stored and shown, never interpreted.
+    """
+    raw = _read_json(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("emails"), list):
+        raise _fail("emails", "must be a list at the top level of the file")
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for i, item in enumerate(raw["emails"]):
+        where = f"emails[{i}]"
+        if not isinstance(item, dict):
+            raise _fail(where, "must be an object")
+        contact_id = _contact_id(item.get("contact_id"), f"{where}.contact_id")
+        if contact_id in seen:
+            raise _fail(f"{where}.contact_id", f"duplicate Contact id {contact_id}: one Outreach Email per Contact")
+        seen.add(contact_id)
+        to = _recipient_list(item.get("to"), f"{where}.to", required=True)
+        extra = _recipient_list(item.get("cc"), f"{where}.cc", False) + _recipient_list(
+            item.get("bcc"), f"{where}.bcc", False)
+        subject = _text(item.get("subject"), f"{where}.subject")
+        if "\n" in subject or "\r" in subject or len(subject) > MAX_SUBJECT_CHARS:
+            raise _fail(f"{where}.subject", f"must be one line of at most {MAX_SUBJECT_CHARS} characters")
+        body = _text(item.get("body"), f"{where}.body")
+        if len(body) > MAX_BODY_CHARS:
+            raise _fail(f"{where}.body", f"must be at most {MAX_BODY_CHARS} characters")
+        out.append({"contact_id": contact_id, "recipients": to + extra, "subject": subject, "body": body})
+    return out
+
+
 def load_bounces(path: Path) -> list[dict[str, str]]:
     """Read `bounces.json`: each bounce has an address, and optionally a date and a note."""
     raw = _read_json(path)
@@ -153,10 +230,7 @@ def load_bounces(path: Path) -> list[dict[str, str]]:
         where = f"bounces[{i}]"
         if not isinstance(item, dict):
             raise _fail(where, "must be an object")
-        address = _text(item.get("address"), f"{where}.address").lower()
-        local, _, domain = address.partition("@")
-        if not local or "." not in domain or any(c.isspace() or c in "@<>," for c in local + domain):
-            raise _fail(f"{where}.address", f"must be an email address, got {address!r}")
+        address = _address(item.get("address"), f"{where}.address")
         bounced_at = _optional_text(item.get("bounced_at"), f"{where}.bounced_at")
         if bounced_at:
             try:
