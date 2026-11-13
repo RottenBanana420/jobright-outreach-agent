@@ -36,7 +36,6 @@ def linkedin_key(url: str) -> str:
 class Picks:
     picked: list[dict[str, Any]]
     flagged: list[dict[str, Any]]
-    eligible: int
 
 
 _CATEGORY_ORDER = [name for name, _ in _CATEGORY_KEYWORDS] + [OTHER]
@@ -86,4 +85,4 @@ def pick_contacts(
             flagged.append({**person, "cooldown_last_emailed": last.isoformat()})
         else:
             picked.append(person)
-    return Picks(picked=picked[:cap], flagged=flagged, eligible=len(picked))
+    return Picks(picked=picked[:cap], flagged=flagged)

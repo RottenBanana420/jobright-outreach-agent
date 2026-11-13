@@ -30,9 +30,9 @@ HOST = "127.0.0.1"
 MAX_FORM_BYTES = 200_000
 _CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 _NOTICES = {
-    "edited": "Saved.",
+    "edited": "Edits saved.",
     "resume": "Resume Variant switched.",
-    "decided": "Saved.",
+    "decided": "Decision saved.",
     "confirmed": "Confirmed: the approved emails are marked ready to send.",
     "dryrun": "Dry run: totals confirmed; nothing was marked and nothing can be sent.",
 }
@@ -134,7 +134,8 @@ class _Handler(BaseHTTPRequestHandler):
         notice = _NOTICES.get(query.get("notice", [""])[0], "")
         if query.get("notice") == ["bulk"]:
             n, left = (_int(query.get(k, [""])[0]) for k in ("n", "left"))
-            notice = f"Bulk approved {n} email(s); {left} with findings, a blocked resume or another status were left."
+            notice = (f"Bulk approved {n} email(s); {left} left because of a blocked resume. "
+                      "Switch the Resume Variant or fix the file, then approve them.")
         with closing(Store(self.server.db_path)) as store:
             body = render_page(store, self.server.config, self.server.run_id, self.server.token, notice)
         self._send(200, body)
@@ -237,7 +238,8 @@ def _render_email(row: sqlite3.Row, token: str, locked: bool) -> str:
         f'category {_e(row["category"])} &middot; Jobright group: {_e(contact_groups)}'
         + (f' &middot; {_e(row["connection"])}' if row["connection"] else "") + "<br>"
         f'LinkedIn: {_safe_link(row["linkedin_url"])}<br>'
-        f'To: {_e(row["address"])} <span class="warn">(unverified address: inferred by Jobright)</span> '
+        f'To: {_e(row["address"])} <span class="warn">(Unverified Address: Jobright says it found this '
+        "from public information, so it may be wrong)</span> "
         f'&middot; Status: <strong>{_e(row["status"])}</strong></p>',
     ]
     if row["block_reason"]:
@@ -261,6 +263,42 @@ def _render_email(row: sqlite3.Row, token: str, locked: bool) -> str:
     return "".join(parts)
 
 
+def _render_resume(group_rows: list[sqlite3.Row], config: Config, token: str) -> str:
+    first = group_rows[0]
+    variants = "".join(
+        f'<option value="{_e(v)}"{" selected" if v == first["resume_variant"] else ""}>{_e(v)}</option>'
+        for v in config.resume_files
+    )
+    locked = all(r["status"] in emails.LOCKED for r in group_rows)
+    switch = "" if locked else _form(
+        f"/groups/{first['group_id']}/resume", token,
+        f'<label>Resume Variant <select name="variant">{variants}</select></label><button>Switch</button>',
+    )
+    return (f"<p>Resume: <strong>{_e(first['resume_variant'])}</strong> "
+            f"({_e(Path(first['resume_path']).name)}) {switch}</p>")
+
+
+def _flag_reason(contact: sqlite3.Row) -> str:
+    if contact["status"] == "flagged":
+        last = (contact["cooldown_last_emailed"] or "")[:10]
+        return "emailed within the cooldown window" + (f" (last emailed {last})" if last else "")
+    if contact["status"] == "bounced":
+        return "address bounced before"
+    return "same address as another Contact in this Run's emails"
+
+
+def _render_flagged(contacts: list[sqlite3.Row]) -> str:
+    """Contacts that get no email, with why, so nobody is silently missing from the page."""
+    if not contacts:
+        return ""
+    items = "".join(
+        f"<li>{_e(c['name'])} &middot; {_e(c['title'])} &middot; {_safe_link(c['linkedin_url'])}: "
+        f"{_e(_flag_reason(c))}</li>"
+        for c in contacts
+    )
+    return f'<div class="warn"><p>Flagged for review, no Outreach Email:</p><ul>{items}</ul></div>'
+
+
 def render_page(store: Store, config: Config, run_id: int, token: str, notice: str = "") -> str:
     run = store.get_run(run_id)
     rows = store.run_emails(run_id)
@@ -278,34 +316,25 @@ def render_page(store: Store, config: Config, run_id: int, token: str, notice: s
     summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no emails"
     out.append(f"<p>{len(rows)} Outreach Email(s): {_e(summary)}.</p>")
 
-    seen: set[int] = set()
-    for row in rows:
-        if row["group_id"] in seen:
-            continue
-        seen.add(row["group_id"])
-        group_rows = [r for r in rows if r["group_id"] == row["group_id"]]
-        apps = store.group_applications(row["group_id"])
+    flagged: dict[int, list[sqlite3.Row]] = {}
+    for contact in store.flagged_contacts(run_id):
+        flagged.setdefault(contact["group_id"], []).append(contact)
+    for group in store.shortlisted_groups(run_id):
+        group_rows = [r for r in rows if r["group_id"] == group["id"]]
         roles = ", ".join(
             f"{_e(a['title'])} (Match Score {'closed' if a['match_score'] is None else a['match_score']})"
-            for a in apps
+            for a in store.group_applications(group["id"])
         )
-        variants = "".join(
-            f'<option value="{_e(v)}"{" selected" if v == row["resume_variant"] else ""}>{_e(v)}</option>'
-            for v in config.resume_files
-        )
-        locked = all(r["status"] in emails.LOCKED for r in group_rows)
-        switch = "" if locked else _form(
-            f"/groups/{row['group_id']}/resume", token,
-            f'<label>Resume Variant <select name="variant">{variants}</select></label><button>Switch</button>',
-        )
-        picked = f"{row['contacts_picked']} of {row['contact_cap']}" if row["contact_cap"] is not None else "?"
+        picked = f"{group['contacts_picked']} of {group['contact_cap']}" if group["contact_cap"] is not None else "?"
         out.append(
-            f'<section id="group-{row["group_id"]}"><h2>{_e(row["company"])} <small class="muted">Rank {row["rank"]}'
+            f'<section id="group-{group["id"]}"><h2>{_e(group["name"])} <small class="muted">Rank {group["rank"]}'
             f"</small></h2><p>Roles: {roles}</p><p>Contacts: {_e(picked)} &middot; "
-            f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: none (dry-run stage)</p>"
-            f"<p>Resume: <strong>{_e(row['resume_variant'])}</strong> "
-            f"({_e(Path(row['resume_path']).name)}) {switch}</p>"
+            + (f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: none (dry-run stage)</p>"
+               if group_rows else "no Outreach Emails for this Company Group</p>")
         )
+        if group_rows:
+            out.append(_render_resume(group_rows, config, token))
+        out.append(_render_flagged(flagged.get(group["id"], [])))
         out.extend(_render_email(r, token, r["status"] in emails.LOCKED) for r in group_rows)
         out.append("</section>")
 
@@ -316,8 +345,12 @@ def render_page(store: Store, config: Config, run_id: int, token: str, notice: s
         '<label>and of recipients <input type="text" name="recipients" size="4" autocomplete="off"></label> '
         "<button>Confirm</button>"
     ))
-    bulk = _form("/bulk-approve", token, "<button>Bulk approve clean emails</button>")
+    waiting = [r for r in rows if r["status"] == "written"]
+    blocked = sum(1 for r in waiting if r["block_reason"])
+    bulk = _form("/bulk-approve", token, "<button>Bulk approve</button>")
     out.append(f"<section><h2>Approval</h2>{bulk}"
-               '<p class="muted">Bulk approve skips emails with findings or a blocked resume; '
-               f"review those one by one.</p>{confirm}</section>")
+               f'<p class="muted">{len(waiting)} waiting for review, {blocked} with a blocked resume. '
+               "Bulk approve approves every email still waiting for review, including ones with findings "
+               "(findings do not block Approval) but not ones with a blocked resume; "
+               f"those stay until you switch the Resume Variant or fix the file.</p>{confirm}</section>")
     return "".join(out)

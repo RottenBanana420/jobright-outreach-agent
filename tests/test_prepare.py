@@ -15,6 +15,7 @@ from conftest import (
     make_body,
     make_contact,
     make_email,
+    make_pdf,
     prepared_inputs,
     resume_config,
     write_for_all,
@@ -38,8 +39,8 @@ def test_prepare_attaches_each_email_to_its_contact_and_company_group(env: Env) 
         " JOIN contacts c ON c.id = e.contact_id JOIN company_groups g ON g.id = e.group_id ORDER BY c.position"
     )
     assert [(r["name"], r["company"], r["status"], r["address"]) for r in rows] == [
-        ("Eng 0", "Acme", "drafted", "eng.0@acme.test"),
-        ("Eng 1", "Acme", "drafted", "eng.1@acme.test"),
+        ("Eng 0", "Acme", "written", "eng.0@acme.test"),
+        ("Eng 1", "Acme", "written", "eng.1@acme.test"),
     ]
     assert rows[0]["subject"] == "Applied for Backend Engineer"
     assert "2 Outreach Email(s)" in result.out
@@ -77,7 +78,7 @@ def test_the_database_allows_one_outreach_email_per_contact_and_company_group(en
         con.execute(
             "INSERT INTO outreach_emails (run_id, contact_id, group_id, address, subject, body, content_hash,"
             " resume_variant, resume_path, status, findings, created_at)"
-            " VALUES (?, ?, ?, 'x@acme.test', 's', 'b', 'h', 'software', '', 'drafted', '[]', '')",
+            " VALUES (?, ?, ?, 'x@acme.test', 's', 'b', 'h', 'software', '', 'written', '[]', '')",
             (row["run_id"], row["contact_id"], row["group_id"]),
         )
     con.close()
@@ -100,7 +101,7 @@ def test_status_changes_are_logged_as_events(env: Env) -> None:
     [row] = emails(env)
     history = env.query("SELECT from_status, to_status FROM events WHERE entity = 'outreach_emails' AND entity_id = ?",
                         row["id"])
-    assert [(e["from_status"], e["to_status"]) for e in history] == [(None, "drafted")]
+    assert [(e["from_status"], e["to_status"]) for e in history] == [(None, "written")]
 
 
 # --- Resume Variant ---------------------------------------------------------------------------
@@ -123,6 +124,16 @@ def test_status_changes_are_logged_as_events(env: Env) -> None:
     ("HTML Developer", "software"),  # "ML" inside a word is not a match
     ("Said Engineer", "software"),  # nor "AI"
     ("Forward Deployed Data Engineer", "forward_deployed"),  # first match wins
+    ("Forward-Deployed Engineer", "forward_deployed"),
+    ("Forward_Deployed Engineer", "forward_deployed"),
+    ("Machine-Learning Engineer", "ml"),
+    ("MLOps Engineer", "ml"),
+    ("ML-Ops Engineer", "ml"),
+    ("Gen-AI Engineer", "ai"),
+    ("Applied-AI Engineer", "ai"),
+    ("Data-Platform Engineer", "data"),
+    ("Machine-Learning Forward-Deployed Engineer", "forward_deployed"),
+    ("HTML-Developer", "software"),
 ])
 def test_resume_variant_follows_the_first_match_wins_table(env: Env, title: str, variant: str) -> None:
     ids = prepared_inputs(env, roles=[(title, 90)], contacts=1)
@@ -182,6 +193,10 @@ def test_a_resume_file_can_be_remapped_in_the_config(env: Env) -> None:
     ("missing", "does not exist"),
     ("not_pdf", "not a PDF"),
     ("truncated", "not a readable PDF"),
+    ("junk_between_markers", "not a readable PDF"),  # a valid header and %%EOF, nothing PDF-like between
+    ("startxref_past_the_end", "not a readable PDF"),
+    ("startxref_at_junk", "not a readable PDF"),
+    ("cut_in_the_middle", "not a readable PDF"),
     ("huge", "25 MB"),
 ])
 def test_a_bad_resume_blocks_the_email_with_a_clear_message(env: Env, setup: str, message: str) -> None:
@@ -193,6 +208,14 @@ def test_a_bad_resume_blocks_the_email_with_a_clear_message(env: Env, setup: str
         path.write_bytes(b"just some text")
     elif setup == "truncated":
         path.write_bytes(b"%PDF-1.4\n1 0 obj\n")
+    elif setup == "junk_between_markers":
+        path.write_bytes(b"%PDF-1.4\n" + b"not really a pdf at all\n" * 20 + b"%%EOF\n")
+    elif setup == "startxref_past_the_end":
+        path.write_bytes(make_pdf(startxref=999_999))
+    elif setup == "startxref_at_junk":
+        path.write_bytes(make_pdf(startxref=12))  # inside the first object's text, not an xref table or object
+    elif setup == "cut_in_the_middle":
+        path.write_bytes(make_pdf()[:-60])  # the tail with the xref pointer and marker is gone
     else:
         path.write_bytes(b"%PDF-1.4\n" + b"x" * (25 * 1024 * 1024) + b"\n%%EOF\n")
     write_for_all(env, ids)
@@ -201,7 +224,7 @@ def test_a_bad_resume_blocks_the_email_with_a_clear_message(env: Env, setup: str
 
     assert result.code == 0, result.err
     [row] = emails(env)
-    assert row["status"] == "drafted"
+    assert row["status"] == "written"
     assert message in row["block_reason"]
     assert str(path.name) in row["block_reason"]
     assert "blocked" in result.out
@@ -290,7 +313,7 @@ def test_findings_do_not_stop_the_email_being_prepared(env: Env) -> None:
     one_email(env, body="Too short.")
     assert env.prepare().code == 0
     [row] = emails(env)
-    assert row["status"] == "drafted"
+    assert row["status"] == "written"
     assert set(findings(env)) == {"word_count", "role_title", "applied"}
 
 
@@ -501,21 +524,54 @@ def test_prepare_skips_the_humanizer_check_when_the_script_is_missing(env: Env) 
     assert "humanizer check skipped" in result.out
 
 
-def test_humanizer_check_findings_are_added_to_the_lint(env: Env) -> None:
+# Models the real check (~/.claude/skills/work-humanizer/check.py): body on stdin, exit code 0 always, and
+# stdout holds "label: hits" lines for what it flagged plus stats lines ("sentences: ...", "words: N") even
+# for clean text.
+FAKE_CHECK = (
+    "import sys\n"
+    "body = sys.stdin.read()\n"
+    "if 'Thanks' in body:\n"
+    "    print('filler hedges: [\\'arguably\\']')\n"
+    "    print('exclamation marks: 2')\n"
+    "if 'Thanks' in body and 'Thanks Thanks' in body:\n"
+    "    print('sentences: 9, mean 8.0 words, 80% within 5 words of the median (uniform: vary)')\n"
+    "else:\n"
+    "    print('sentences: 9, mean 8.0 words, 20% within 5 words of the median')\n"
+    "print(f'words: {len(body.split())}')\n"
+)
+
+
+def humanizer_env(env: Env, source: str, body: str | None = None) -> None:
     script = env.root / "check.py"
-    script.write_text(
-        "import sys\nbody = sys.stdin.read()\n"
-        "if 'Thanks' in body:\n    print('stock closer: Thanks')\n    sys.exit(1)\n"
-    )
+    script.write_text(source)
     ids = prepared_inputs(env, contacts=1, extra_config=f'humanizer_check = "{script}"')
-    write_for_all(env, ids)
+    write_for_all(env, ids, **({} if body is None else {"body": body}))
+
+
+def test_humanizer_check_findings_are_added_to_the_lint(env: Env) -> None:
+    humanizer_env(env, FAKE_CHECK)
 
     result = env.prepare()
 
     assert result.code == 0, result.err
     [row] = emails(env)
-    [finding] = json.loads(row["findings"])
-    assert finding == {"code": "humanizer", "message": "work-humanizer: stock closer: Thanks"}
+    messages = [f["message"] for f in json.loads(row["findings"])]
+    assert messages == [
+        "work-humanizer: filler hedges: ['arguably']",
+        "work-humanizer: exclamation marks: 2",
+        "work-humanizer: sentences: 9, mean 8.0 words, 80% within 5 words of the median (uniform: vary)",
+    ]
+    assert "humanizer check skipped" not in result.out
+
+
+def test_clean_text_with_only_stats_lines_has_no_humanizer_findings(env: Env) -> None:
+    clean = make_body().replace("Thanks", "Cheers")
+    humanizer_env(env, FAKE_CHECK, body=clean)
+
+    result = env.prepare()
+
+    assert result.code == 0, result.err
+    assert findings(env) == []
     assert "humanizer check skipped" not in result.out
 
 
@@ -527,3 +583,28 @@ def test_a_crashing_humanizer_script_is_skipped_not_fatal(env: Env) -> None:
     result = env.prepare()
     assert result.code == 0
     assert findings(env) == []
+
+
+def test_a_database_with_the_old_drafted_status_is_upgraded_to_written(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1)
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    con = sqlite3.connect(env.db)
+    con.execute("UPDATE outreach_emails SET status = 'drafted'")
+    con.execute("UPDATE events SET to_status = 'drafted' WHERE entity = 'outreach_emails' AND to_status = 'written'")
+    con.commit()
+    con.close()
+
+    assert env.prepare().code == 0  # opening the database upgrades it
+
+    [row] = emails(env)
+    assert row["status"] == "written"
+    assert env.query("SELECT 1 FROM events WHERE to_status = 'drafted' OR from_status = 'drafted'") == []
+
+
+def test_a_humanizer_script_that_exits_non_zero_is_skipped_even_with_output(env: Env) -> None:
+    humanizer_env(env, "import sys\nprint('Traceback-looking output')\nsys.exit(1)\n")
+    result = env.prepare()
+    assert result.code == 0
+    assert findings(env) == []
+    assert "humanizer check skipped" in result.out

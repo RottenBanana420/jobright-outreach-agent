@@ -1,13 +1,14 @@
 """`outreach pick-contacts`, driven through the CLI with synthetic candidates."""
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import replace
 from datetime import date
 from typing import Any
 
-from conftest import Env, make_app, make_contact
+from conftest import Env, make_app, make_contact, prepared_inputs, write_for_all
 from outreach.store import Store
 
 
@@ -170,6 +171,44 @@ def test_picking_again_updates_in_place_and_keeps_contact_ids(env: Env) -> None:
     assert env.picked_names("Acme") == ["Eng 0", "Eng 1"]
     events = env.query("SELECT to_status FROM events WHERE entity = 'contacts' AND entity_id = ?", first["Eng 0"])
     assert [e["to_status"] for e in events] == ["picked"]
+
+
+def test_picking_again_never_deletes_a_dropped_contact_who_has_an_outreach_email(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=3)
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    con = sqlite3.connect(env.db)
+    con.execute("UPDATE outreach_emails SET status = 'approved' WHERE contact_id = ?", (ids["Eng 2"],))
+    con.commit()
+    con.close()
+
+    env.write_candidates({"Acme": engineers(1)})  # Eng 1 and Eng 2 are gone from the new candidates
+    assert env.pick_contacts().code == 0
+
+    assert env.picked_names("Acme") == ["Eng 0"]
+    assert [r["status"] for r in env.query("SELECT status FROM outreach_emails ORDER BY contact_id")] == [
+        "written", "written", "approved",
+    ]
+    dropped = {r["name"]: r["status"] for r in env.query("SELECT name, status FROM contacts")}
+    assert dropped == {"Eng 0": "picked", "Eng 1": "dropped", "Eng 2": "dropped"}
+    events = env.query("SELECT to_status FROM events WHERE entity = 'contacts' AND entity_id = ?", ids["Eng 2"])
+    assert [e["to_status"] for e in events] == ["picked", "dropped"]
+    assert [g["picked_of_cap"] for g in env.picked_json()["groups"]] == ["1 of 4"]
+    assert env.picked_json()["groups"][0]["review"] == []
+
+
+def test_a_dropped_contact_who_is_picked_again_comes_back_with_the_same_id(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2)
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    env.write_candidates({"Acme": engineers(1)})
+    assert env.pick_contacts().code == 0
+
+    env.write_candidates({"Acme": engineers(2)})
+    assert env.pick_contacts().code == 0
+
+    assert env.contact_ids() == ids
+    assert len(env.query("SELECT 1 FROM outreach_emails")) == 2
 
 
 def test_a_shortlisted_group_without_candidates_gets_no_contacts(env: Env) -> None:

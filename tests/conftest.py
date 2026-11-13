@@ -159,7 +159,22 @@ AppFactory = Callable[..., dict[str, Any]]
 
 # --- revealed addresses, written emails, resumes (ticket #4) -------------------------------------
 
-TINY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
+def make_pdf(startxref: int | None = None) -> bytes:
+    """A tiny well-formed PDF: header, two objects, an xref table, a trailer and `startxref`.
+
+    `startxref` overrides the offset the file claims for its xref table (to make a corrupt file).
+    """
+    body = (b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+    first = body.index(b"1 0 obj")
+    second = body.index(b"2 0 obj")
+    xref = (b"xref\n0 3\n0000000000 65535 f \n"
+            + f"{first:010d} 00000 n \n{second:010d} 00000 n \n".encode())
+    offset = len(body) if startxref is None else startxref
+    return body + xref + b"trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n" + str(offset).encode() + b"\n%%EOF\n"
+
+
+TINY_PDF = make_pdf()
 VARIANT_FILES = {
     "forward_deployed": "Resume_Forward_Deployed_Engineer.pdf",
     "ml": "Resume_ML_Engineer.pdf",

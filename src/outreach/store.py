@@ -125,6 +125,7 @@ class Store:
         self._add_missing_columns("company_groups", {"contact_cap": "INTEGER", "contacts_picked": "INTEGER"})
         self._add_missing_columns("runs", {"dry_run": "INTEGER NOT NULL DEFAULT 0"})
         self._add_missing_columns("events", {"kind": "TEXT NOT NULL DEFAULT 'status'"})
+        self._rename_status("outreach_emails", "drafted", "written")
 
     def _add_missing_columns(self, table: str, columns: dict[str, str]) -> None:
         """Bring a database made by an earlier version up to date."""
@@ -132,6 +133,13 @@ class Store:
         for name, kind in columns.items():
             if name not in have:
                 self._con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+    def _rename_status(self, entity: str, old: str, new: str) -> None:
+        """Rename a status in place, in the rows and in their audit events (earlier versions used `old`)."""
+        self._con.execute(f"UPDATE {entity} SET status = ? WHERE status = ?", (new, old))
+        self._con.execute("UPDATE events SET to_status = ? WHERE entity = ? AND to_status = ?", (new, entity, old))
+        self._con.execute("UPDATE events SET from_status = ? WHERE entity = ? AND from_status = ?", (new, entity, old))
+        self._con.commit()
 
     def close(self) -> None:
         self._con.close()
@@ -237,7 +245,7 @@ class Store:
 
     def shortlisted_groups(self, run_id: int) -> list[sqlite3.Row]:
         return self._con.execute(
-            "SELECT id, key, name, rank FROM company_groups WHERE run_id = ? AND status != 'cut' ORDER BY rank",
+            "SELECT * FROM company_groups WHERE run_id = ? AND status != 'cut' ORDER BY rank",
             (run_id,),
         ).fetchall()
 
@@ -248,7 +256,8 @@ class Store:
         """Replace a Company Group's Contacts with this pick; the group remembers "N of M".
 
         Rows are updated in place, never recreated, so later steps (addresses, Outreach Emails)
-        can hang state off them and a re-run is safe. Contacts no longer in the pick are removed.
+        can hang state off them and a re-run is safe. Contacts no longer in the pick are removed, except
+        those with an Outreach Email, which are kept with status `dropped` so the email is not lost.
         """
         keep: list[str] = []
         ordered = [(c, "picked") for c in picked] + [(c, "flagged") for c in flagged]
@@ -278,9 +287,16 @@ class Store:
                 self.set_status("contacts", int(row["id"]), status)
             keep.append(c["key"])
         marks = ", ".join("?" for _ in keep)
-        self._con.execute(
-            f"DELETE FROM contacts WHERE group_id = ? AND linkedin_key NOT IN ({marks})", (group_id, *keep)
-        )
+        gone = self._con.execute(
+            f"SELECT id, status, EXISTS (SELECT 1 FROM outreach_emails WHERE contact_id = contacts.id) AS has_email"
+            f" FROM contacts WHERE group_id = ? AND linkedin_key NOT IN ({marks})", (group_id, *keep),
+        ).fetchall()
+        for row in gone:
+            if row["has_email"]:
+                # Deleting would cascade to the Outreach Email, losing a reviewed or approved email.
+                self.set_status("contacts", int(row["id"]), "dropped", "no longer in the contact candidates")
+            else:
+                self._con.execute("DELETE FROM contacts WHERE id = ?", (row["id"],))
         self._con.execute(
             "UPDATE company_groups SET contact_cap = ?, contacts_picked = ? WHERE id = ?",
             (cap, len(picked), group_id),
@@ -289,6 +305,13 @@ class Store:
     def picked_contacts(self, group_id: int) -> list[sqlite3.Row]:
         return self._con.execute(
             "SELECT * FROM contacts WHERE group_id = ? ORDER BY position", (group_id,)
+        ).fetchall()
+
+    def flagged_contacts(self, run_id: int) -> list[sqlite3.Row]:
+        """Contacts of the Run that get no email and need the user's eye: cooldown, bounced, shared address."""
+        return self._con.execute(
+            "SELECT * FROM contacts WHERE run_id = ? AND status IN ('flagged', 'bounced', 'duplicate_address')"
+            " ORDER BY group_id, position", (run_id,),
         ).fetchall()
 
     def set_contact_email(self, contact_id: int, address: str) -> None:
@@ -376,12 +399,12 @@ class Store:
             cur = self._con.execute(
                 "INSERT INTO outreach_emails (run_id, contact_id, group_id, address, subject, body, content_hash,"
                 " resume_variant, resume_path, block_reason, findings, status, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'drafted', ?)",
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'written', ?)",
                 (run_id, contact_id, group_id, address, subject, body, content_hash, resume_variant, resume_path,
                  block_reason, findings, _now()),
             )
             email_id = int(cur.lastrowid or 0)
-            self._log("outreach_emails", email_id, None, "drafted")
+            self._log("outreach_emails", email_id, None, "written")
             return email_id
         email_id = int(row["id"])
         self._con.execute(
@@ -390,7 +413,7 @@ class Store:
             (address, subject, body, content_hash, resume_variant, resume_path, block_reason, findings, email_id),
         )
         self.log_edit("outreach_emails", email_id, "re-prepared from the written emails file")
-        self.set_status("outreach_emails", email_id, "drafted", "re-prepared")
+        self.set_status("outreach_emails", email_id, "written", "re-prepared")
         return email_id
 
     def get_email(self, email_id: int) -> sqlite3.Row | None:
@@ -415,16 +438,12 @@ class Store:
             (subject, body, content_hash, findings, email_id),
         )
 
-    def update_group_resume(
-        self, group_id: int, variant: str, path: str, block_reason: str | None
-    ) -> list[int]:
-        """Point every Outreach Email of a Company Group at one Resume Variant. Returns their ids."""
+    def update_group_resume(self, group_id: int, variant: str, path: str, block_reason: str | None) -> None:
+        """Point every Outreach Email of a Company Group at one Resume Variant."""
         self._con.execute(
             "UPDATE outreach_emails SET resume_variant = ?, resume_path = ?, block_reason = ? WHERE group_id = ?",
             (variant, path, block_reason, group_id),
         )
-        return [int(r["id"]) for r in self._con.execute(
-            "SELECT id FROM outreach_emails WHERE group_id = ?", (group_id,))]
 
     def get_group(self, group_id: int) -> sqlite3.Row:
         row: sqlite3.Row | None = self._con.execute(
