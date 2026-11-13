@@ -31,7 +31,9 @@ Ends Claude Code and its child processes and `caffeinate`, clears the Run's proc
 
 ## Resuming
 
-`outreach start` again on the same day reuses the same Run folder and Run row. Steps whose files are complete are skipped, so Jobright is not read again and no email already written is written again. Once the Run has Outreach Emails (`prepared`), the command runs `outreach review <run-dir>` and never `prepare` again, because `prepare` would put the user's edits and decisions back to the file's text.
+`outreach start` again on the same day reuses the same Run folder and Run row. Steps whose files are complete are skipped, so Jobright is not read again and no email already written is written again. Once the Run has Outreach Emails (`prepared`), the command never runs `prepare` again, because `prepare` would put the user's edits and decisions back to the file's text. Instead (unless the Run is a dry run) it first runs `outreach send <run-dir>`, which sends only what the user already confirmed and exits 2 ("nothing to send") when nothing was confirmed, and then `outreach review <run-dir>` for whatever is still waiting for review.
+
+A `stop` that arrives before Claude Code has been recorded (right after `start`) still takes effect: `start` records process ids only while the Run is not `stopped`, ends a Claude it just spawned, and launches nothing when the stop came first.
 
 ## `outreach review <run-dir> [--port N] [--config] [--db]`
 

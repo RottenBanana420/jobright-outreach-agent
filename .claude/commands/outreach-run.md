@@ -36,7 +36,7 @@ If `resumed` is true, the Run was stopped or crashed earlier. Do not repeat work
 
 - A step is done when its file exists and is complete: `bounces.json`, `applications.json`, `shortlist.json`, `contact_candidates.json` and `picked_contacts.json` are written only once complete, so their existence means done. Skip those steps and use the files.
 - `revealed_addresses.json`, `draft_subjects.json` and `written_emails.json` are written a little at a time. For these, reveal or write only for the picked Contacts that have no entry yet, and keep the entries already there.
-- If `steps_done` contains `prepared`, the Outreach Emails are already in SQLite and may carry the user's edits and decisions. Do **not** write or prepare them again, and do not call `prepare` again (it would overwrite the edits). Go straight to step 7 and run `uv run outreach review RUN_DIR`.
+- If `steps_done` contains `prepared`, the Outreach Emails are already in SQLite and may carry the user's edits and decisions. Do **not** write or prepare them again, and do not call `prepare` again (it would overwrite the edits). Go straight to step 7, "Resume after `prepared`".
 - Never rewrite an email that exists in `written_emails.json`.
 
 ## Steps
@@ -113,18 +113,25 @@ For each picked Contact with a revealed address and no entry yet in `written_ema
 **Humanize every email.** For each body:
 
 1. Invoke the `work-humanizer` skill in **Rewrite mode** on the written body (treat the draft as the text given to you; keep every fact, the exact role titles, and "applied"; the skill's Interview mode is not used).
-2. Run its check as a lint: take the script path from `uv run outreach config` (`humanizer_check`); if that is empty use `~/.claude/skills/work-humanizer/check.py`. Run `python3 <script> -` with the body on stdin, and edit the body to clear what it flags where that can be done without changing what it says.
+2. Run its check as a lint: take the script path from `uv run outreach config` (`humanizer_check`); if that is empty use `~/.claude/skills/work-humanizer/check.py`, written exactly like that with the `~`. Run `python3 <script> -` with the body on stdin (a quoted here-document, so the body cannot become part of the command), and edit the body to clear what it flags where that can be done without changing what it says.
 3. Re-count the words after the rewrite: the body must still be 80 to 140 words, still contain every exact role title in the group, and still say the user applied. `prepare` lints these three too, and shows any failure on the review page for the user to fix.
 
 After each email, rewrite `RUN_DIR/written_emails.json` as `{"emails": [{"contact_id": <id>, "to": ["<address>"], "subject": "...", "body": "..."}]}` with all emails so far, in the shape in `docs/review-handoff-files.md`. Contacts under `review` get no email.
 
 ### 7. Prepare and open the review page
 
-Run `uv run outreach prepare RUN_DIR [--dry-run] [--config X] [--db X] [--now X]` (add `--dry-run` exactly when `dry_run` is true; if `steps_done` contains `prepared`, run `uv run outreach review RUN_DIR [--config X] [--db X]` instead and never `prepare`). It serves the review page and does not return until the user confirms or stops it, so start it as a **background** Bash command. It posts the Mac notification when the page is ready.
+Run `uv run outreach prepare RUN_DIR [--dry-run] [--config X] [--db X] [--now X]` (add `--dry-run` exactly when `dry_run` is true; if `steps_done` contains `prepared`, follow "Resume after `prepared`" below instead and never `prepare`). It serves the review page and does not return until the user confirms or stops it, so start it as a **background** Bash command. It posts the Mac notification when the page is ready.
 
 - Read its first output lines: if `prepare` exits with an error (exit code 2: for example a file rejected with the field named, or more than one recipient), show the message, fix the file if the mistake is yours, and run it again. If a Resume Variant file is bad, `prepare` still succeeds and the page shows those emails as blocked; tell the user which file.
 - Tell the user the review page URL, how many emails are waiting, and (for a dry run) that no Gmail drafts were made and nothing can be sent. Then wait. Do **not** approve, reject, skip, confirm or send anything yourself: only the user does, on the page.
 - When the background command ends, the user has confirmed or stopped it. Give the final report.
+
+**Resume after `prepared`.** The emails are in SQLite and the user may already have confirmed them before the Run stopped, so the right command depends on how far it got:
+
+1. If `dry_run` is false, run `uv run outreach send RUN_DIR [--config X] [--db X]` in the foreground first. It only sends emails the user already confirmed on the review page (`ready_to_send`, or half sent from before). It refuses with exit code 2 and "nothing to send" when nothing was confirmed; that is expected, not an error, so go to step 2. Exit code 0 means everything confirmed was sent; exit code 3 means some are left (the output says which and why, for example `uncertain` emails the user must check in Gmail Sent by hand). Report either result, and go on to step 2 only if emails are still waiting for review.
+2. Otherwise run `uv run outreach review RUN_DIR [--config X] [--db X]` as a **background** command, exactly like `prepare` above, and tell the user the URL. It serves the page for the emails not yet decided or confirmed and sends what the user confirms.
+
+Never approve, confirm or send on your own authority: `send` only acts on the user's earlier confirmation, which Python checks.
 
 ## When something goes wrong
 

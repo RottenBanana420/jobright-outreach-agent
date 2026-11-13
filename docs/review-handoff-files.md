@@ -79,8 +79,9 @@ An expired or revoked token, or a missing one, stops with a message that says to
 
 - `prepare` (not dry-run) creates one draft per email. Each draft id is saved as soon as Gmail returns it, so a failure part way (auth, timeout) leaves the earlier drafts recorded and a second `prepare` carries on. A timeout on creation may leave a stray draft in Gmail that nothing records; it is never sent.
 - An email with a blocked resume gets no draft until its Resume Variant is switched.
-- Review page edits and resume switches update the drafts in the same step. If Gmail fails, nothing is saved and the page says so (HTTP 502). In a dry run they never touch Gmail.
+- Review page edits and resume switches are saved first (one transaction), then copied to the drafts with no transaction open, each new draft id saved as soon as Gmail returns it. If Gmail fails, the change stays saved, the page says so (HTTP 502) and the draft is behind until the next edit or until the sender refreshes it. In a dry run they never touch Gmail.
 - The sender refreshes the draft from the Store right before sending, so what was approved is what goes out, even if an earlier draft update failed half way.
+- A draft that no longer exists in Gmail (deleted by hand) is made again, with a new Message-ID, on the next edit or refresh. The sender does this only for an email that was never attempted (`ready_to_send`). After an attempt it may have consumed the draft, so a missing draft leaves the email `uncertain` instead (see below).
 
 ### `outreach send <run-dir> [--config] [--db]`
 
@@ -89,7 +90,15 @@ Sends the emails the user confirmed (`ready_to_send`), one at a time, `send_paus
 - Success records `gmail_message_id`, `sent_at`, status `sent` ("Gmail accepted it", not "delivered"), starts the Contact's cooldown, then applies the Gmail label `Outreach` (created if missing). A label failure does not undo the send; a rerun labels it.
 - A timeout, dropped connection or 5xx answer marks the email `uncertain`, searches Sent for its Message-ID, and only if it is not there retries once (then searches again). Found means `sent`; no second send.
 - An auth or quota error marks the email `failed` and stops the batch. Another refusal marks it `failed` and the batch carries on. Unsent emails stay `ready_to_send`.
+- `sending` is set only once the draft is ready. A problem before that, including one that is not Gmail's (a resume file that was moved or deleted), marks that one email `failed` and the batch carries on.
 - A rerun first searches Sent for every email left `sending`, `uncertain` or `failed`, then sends what is not there.
+- The Sent search can miss a message that went out (see the check below). So when an email that may already have been attempted has no draft in Gmail any more, and Sent has no message with its Message-ID, the sender does not make a new draft and does not send. It leaves the email `uncertain`, reports "check Sent in Gmail by hand" and counts it as left (exit 3). Look in Gmail Sent for that recipient and subject: if it is there the email went out; if not, the draft was deleted by hand and the email has to be put back by hand in SQLite (there is no command for it yet).
 - Output lists what was sent and what is left. Exit codes: 0 everything sent, 2 refused or bad input, 3 something is left.
 
-Not verified by automated tests: that Gmail keeps the custom Message-ID on `drafts.send`, which the Sent search relies on. Check it by hand against a test account before real outreach.
+### To verify by hand before real outreach (not covered by automated tests)
+
+1. That Gmail keeps our custom Message-ID on `drafts.send`, which `find_sent` (`rfc822msgid:` search in Sent) relies on. With a test account: run a Run with one email to yourself, then look at the sent message's "Show original" for the Message-ID and compare it with `outreach_emails.message_id`. If Gmail rewrote it, the duplicate-send protection by search does not work. The failure mode is safe: a timed-out send whose message cannot be found is not retried blindly. The retry meets a missing draft, and the email is left `uncertain` for a check by hand (above). It also means every ambiguous send needs that manual check.
+2. That the search finds the sent message, i.e. `find_sent` returns it for the id from step 1.
+3. That `drafts.update` and `drafts.send` on a deleted draft answer HTTP 404 (mapped to "not found"). The `uncertain` rule above depends on it.
+
+Tests cover the adapter's error mapping and the token file against a local HTTP server (`tests/test_gmail_api.py`), not Google itself.
