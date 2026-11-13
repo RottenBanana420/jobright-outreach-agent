@@ -32,6 +32,9 @@ logs/
 # Personal config (sender address etc.); see outreach.example.toml
 outreach.toml
 
+# Claude Code subagent worktrees
+.claude/worktrees/
+
 # OS / editor
 .DS_Store
 .idea/

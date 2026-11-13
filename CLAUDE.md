@@ -15,3 +15,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 ## Checks
 
 Lint, typecheck and tests run as one sequence in `.github/workflows/ci.yml`. Run it with `uv run` before committing.
+
+## Review
+
+Reviewers check the diff against `CODING_STANDARDS.md`, `GLOSSARY.md` and `docs/adr/`.
