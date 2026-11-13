@@ -14,6 +14,7 @@ from outreach.config import Config, load_config
 from outreach.contacts import pick_contacts
 from outreach.emails import prepare_emails
 from outreach.errors import UserError
+from outreach.resume import resume_path, variant_for
 from outreach.run import Launcher, SystemLauncher, start_run, stop_run
 from outreach.schema import (
     load_applications,
@@ -166,10 +167,13 @@ def _pick_contacts(args: argparse.Namespace) -> int:
             )
             store.record_picks(run["id"], group["id"], cap, picks.picked, picks.flagged)
             rows = store.picked_contacts(group["id"])
+            variant = variant_for(store.group_applications(group["id"])[0]["title"])
             out_groups.append({
                 "company": group["name"],
                 "rank": group["rank"],
                 "picked_of_cap": f"{len(picks.picked)} of {cap}",
+                "resume_variant": variant,
+                "resume_file": str(resume_path(config, variant)),
                 "contacts": [_contact_out(r) for r in rows if r["status"] == "picked"],
                 "review": [_contact_out(r) for r in rows if r["status"] == "flagged"],
             })
