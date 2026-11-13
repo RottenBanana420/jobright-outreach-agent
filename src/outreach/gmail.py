@@ -15,6 +15,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Protocol
 
@@ -75,7 +76,9 @@ class Gmail(Protocol):
 
 def new_message_id(sender: str) -> str:
     """A unique Message-ID for one Outreach Email, on the sender's own domain."""
-    domain = sender.rpartition("@")[2] or "outreach.invalid"
+    address = parseaddr(sender)[1]  # "Jane Doe <jane@example.com>" -> "jane@example.com"
+    domain = address.rpartition("@")[2] if "@" in address else ""
+    domain = domain or "outreach.invalid"
     return f"<{uuid.uuid4().hex}@{domain}>"
 
 

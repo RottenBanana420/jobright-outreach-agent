@@ -1,6 +1,7 @@
 """Gmail drafts: `outreach prepare` creates them, the review page keeps them in step. Fake Gmail only."""
 from __future__ import annotations
 
+import re
 from email.message import EmailMessage
 
 from conftest import NOW, TINY_PDF, Env, make_body, make_email, prepared_inputs, write_for_all
@@ -42,6 +43,18 @@ def test_each_draft_carries_its_own_message_id_recorded_in_the_store(env: Env) -
     assert ids == [r["message_id"] for r in rows]
     assert len(set(ids)) == 2
     assert all(i.startswith("<") and i.endswith("@example.test>") for i in ids)
+
+
+def test_a_sender_with_a_display_name_still_gets_a_well_formed_message_id(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1)
+    env.write_config(env.config.read_text().replace("me@example.test", "Jane Doe <me@example.test>"))
+    write_for_all(env, ids)
+
+    assert env.prepare().code == 0
+
+    [row] = env.query("SELECT message_id FROM outreach_emails")
+    assert re.fullmatch(r"<[0-9a-f]{32}@example\.test>", row["message_id"])
+    assert env.gmail.only_draft()["From"] == "Jane Doe <me@example.test>"
 
 
 def test_dry_run_creates_no_drafts_and_never_touches_gmail(env: Env) -> None:
