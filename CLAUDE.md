@@ -19,3 +19,7 @@ Lint, typecheck and tests run as one sequence in `.github/workflows/ci.yml`. Run
 ## Review
 
 Reviewers check the diff against `CODING_STANDARDS.md`, `GLOSSARY.md` and `docs/adr/`.
+
+## Handoff files
+
+Before reading or writing a file that passes between Claude and the CLI (applications, contact candidates, picked contacts, revealed addresses, written emails, bounces), read the shapes in `docs/contact-handoff-files.md` and `docs/review-handoff-files.md`. The latter also holds the humanizer check contract.
