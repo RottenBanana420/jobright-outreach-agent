@@ -74,13 +74,17 @@ def _application(raw: Any, path: str) -> dict[str, Any]:
     return app
 
 
-def load_applications(path: Path) -> list[dict[str, Any]]:
+def _read_json(path: Path) -> Any:
     try:
-        raw = json.loads(path.read_text())
+        return json.loads(path.read_text())
     except FileNotFoundError:
         raise UserError(f"{path.name}: file not found in {path.parent}") from None
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise UserError(f"{path.name}: not valid JSON ({e})") from None
+
+
+def load_applications(path: Path) -> list[dict[str, Any]]:
+    raw = _read_json(path)
     if not isinstance(raw, dict) or not isinstance(raw.get("applications"), list):
         raise _fail("applications", "must be a list at the top level of the file")
     apps = [_application(item, f"applications[{i}]") for i, item in enumerate(raw["applications"])]
@@ -90,3 +94,75 @@ def load_applications(path: Path) -> list[dict[str, Any]]:
             raise _fail(f"applications[{i}].jobright_id", f"duplicate id {app['jobright_id']!r}")
         seen.add(app["jobright_id"])
     return apps
+
+
+GROUPS = ("beyond_network", "school", "previous_company")
+
+
+def _optional_text(value: Any, path: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise _fail(path, f"must be a string or null, got {value!r}")
+    return value.strip()
+
+
+def _candidate(raw: Any, path: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise _fail(path, "must be an object")
+    group = raw.get("group")
+    if group not in GROUPS:
+        raise _fail(f"{path}.group", f"must be one of {', '.join(GROUPS)}, got {group!r}")
+    return {
+        "name": _text(raw.get("name"), f"{path}.name"),
+        "title": _optional_text(raw.get("title"), f"{path}.title"),
+        # A blank company is allowed in the file; the picker leaves such Contacts out.
+        "company": _optional_text(raw.get("company"), f"{path}.company"),
+        "linkedin_url": _text(raw.get("linkedin_url"), f"{path}.linkedin_url"),
+        "group": group,
+        "connection": _optional_text(raw.get("connection"), f"{path}.connection"),
+    }
+
+
+def load_contact_candidates(path: Path) -> list[dict[str, Any]]:
+    """Read `contact_candidates.json`: one entry per Company Group, each with its Contacts."""
+    raw = _read_json(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("companies"), list):
+        raise _fail("companies", "must be a list at the top level of the file")
+    companies: list[dict[str, Any]] = []
+    for i, item in enumerate(raw["companies"]):
+        where = f"companies[{i}]"
+        if not isinstance(item, dict):
+            raise _fail(where, "must be an object")
+        if not isinstance(item.get("contacts"), list):
+            raise _fail(f"{where}.contacts", "must be a list")
+        companies.append({
+            "company": _text(item.get("company"), f"{where}.company"),
+            "contacts": [_candidate(c, f"{where}.contacts[{j}]") for j, c in enumerate(item["contacts"])],
+        })
+    return companies
+
+
+def load_bounces(path: Path) -> list[dict[str, str]]:
+    """Read `bounces.json`: each bounce has an address, and optionally a date and a note."""
+    raw = _read_json(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("bounces"), list):
+        raise _fail("bounces", "must be a list at the top level of the file")
+    bounces: list[dict[str, str]] = []
+    for i, item in enumerate(raw["bounces"]):
+        where = f"bounces[{i}]"
+        if not isinstance(item, dict):
+            raise _fail(where, "must be an object")
+        address = _text(item.get("address"), f"{where}.address").lower()
+        local, _, domain = address.partition("@")
+        if not local or "." not in domain or any(c.isspace() or c in "@<>," for c in local + domain):
+            raise _fail(f"{where}.address", f"must be an email address, got {address!r}")
+        bounced_at = _optional_text(item.get("bounced_at"), f"{where}.bounced_at")
+        if bounced_at:
+            try:
+                date.fromisoformat(bounced_at)
+            except ValueError:
+                raise _fail(f"{where}.bounced_at", f"must be a date like 2026-11-12, got {bounced_at!r}") from None
+        note = _optional_text(item.get("note"), f"{where}.note")
+        bounces.append({"address": address, "bounced_at": bounced_at, "note": note})
+    return bounces

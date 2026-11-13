@@ -1,4 +1,4 @@
-"""Store: SQLite holds Runs, Applications and Company Groups, plus an append-only event log.
+"""Store: SQLite holds Runs, Applications, Company Groups, Contacts and bounces, plus an append-only event log.
 
 Every status lives in a `status` column. A status changes only through `Store.set_status`,
 which writes the audit event in the same transaction; the first status of a new row is
@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS company_groups (
     name TEXT NOT NULL,
     rank INTEGER NOT NULL,
     status TEXT NOT NULL,
+    contact_cap INTEGER,
+    contacts_picked INTEGER,
     UNIQUE (run_id, key)
 );
 CREATE TABLE IF NOT EXISTS applications (
@@ -48,6 +50,31 @@ CREATE TABLE IF NOT EXISTS applications (
     details TEXT NOT NULL,
     UNIQUE (run_id, jobright_id)
 );
+CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES runs(id),
+    group_id INTEGER NOT NULL REFERENCES company_groups(id),
+    linkedin_key TEXT NOT NULL,
+    linkedin_url TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    listed_company TEXT NOT NULL,
+    category TEXT NOT NULL,
+    jobright_groups TEXT NOT NULL,
+    connection TEXT NOT NULL,
+    status TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    cooldown_last_emailed TEXT,
+    email TEXT,
+    emailed_at TEXT,
+    UNIQUE (group_id, linkedin_key)
+);
+CREATE TABLE IF NOT EXISTS bounces (
+    address TEXT PRIMARY KEY,
+    bounced_at TEXT NOT NULL,
+    note TEXT NOT NULL,
+    recorded_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT NOT NULL,
@@ -59,7 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 """
 
-_STATUS_TABLES = {"runs", "company_groups"}
+_STATUS_TABLES = {"runs", "company_groups", "contacts"}
 _NOT_DETAILS = {
     "jobright_id", "company", "title", "applied_on",
     "job_closed", "agent_applied", "match_score", "hidden_score",
@@ -77,6 +104,14 @@ class Store:
         self._con.row_factory = sqlite3.Row
         self._con.execute("PRAGMA foreign_keys = ON")
         self._con.executescript(_SCHEMA)
+        self._add_missing_columns("company_groups", {"contact_cap": "INTEGER", "contacts_picked": "INTEGER"})
+
+    def _add_missing_columns(self, table: str, columns: dict[str, str]) -> None:
+        """Bring a database made by an earlier version up to date."""
+        have = {row["name"] for row in self._con.execute(f"PRAGMA table_info({table})")}
+        for name, kind in columns.items():
+            if name not in have:
+                self._con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     def close(self) -> None:
         self._con.close()
@@ -163,6 +198,109 @@ class Store:
         self._delete_missing("applications", "jobright_id", run_id, keep_apps)
         self._delete_missing("company_groups", "key", run_id, keep_groups)
         self.set_status("runs", run_id, "shortlisted")
+
+    def find_run(self, run_dir: Path) -> sqlite3.Row | None:
+        row: sqlite3.Row | None = self._con.execute(
+            "SELECT * FROM runs WHERE run_dir = ?", (str(run_dir.resolve()),)
+        ).fetchone()
+        return row
+
+    def shortlisted_groups(self, run_id: int) -> list[sqlite3.Row]:
+        return self._con.execute(
+            "SELECT id, key, name, rank FROM company_groups WHERE run_id = ? AND status != 'cut' ORDER BY rank",
+            (run_id,),
+        ).fetchall()
+
+    def record_picks(
+        self, run_id: int, group_id: int, cap: int,
+        picked: list[dict[str, Any]], flagged: list[dict[str, Any]],
+    ) -> None:
+        """Replace a Company Group's Contacts with this pick; the group remembers "N of M".
+
+        Rows are updated in place, never recreated, so later steps (addresses, Outreach Emails)
+        can hang state off them and a re-run is safe. Contacts no longer in the pick are removed.
+        """
+        keep: list[str] = []
+        ordered = [(c, "picked") for c in picked] + [(c, "flagged") for c in flagged]
+        for position, (c, status) in enumerate(ordered):
+            fields = (
+                c["linkedin_url"], c["name"], c["title"], c["company"], c["category"],
+                json.dumps(c["groups"]), c["connection"], position, c.get("cooldown_last_emailed"),
+            )
+            row = self._con.execute(
+                "SELECT id FROM contacts WHERE group_id = ? AND linkedin_key = ?", (group_id, c["key"])
+            ).fetchone()
+            if row is None:
+                cur = self._con.execute(
+                    "INSERT INTO contacts (run_id, group_id, linkedin_key, linkedin_url, name, title,"
+                    " listed_company, category, jobright_groups, connection, position,"
+                    " cooldown_last_emailed, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_id, group_id, c["key"], *fields, status),
+                )
+                self._log("contacts", int(cur.lastrowid or 0), None, status)
+            else:
+                self._con.execute(
+                    "UPDATE contacts SET linkedin_url = ?, name = ?, title = ?, listed_company = ?,"
+                    " category = ?, jobright_groups = ?, connection = ?, position = ?,"
+                    " cooldown_last_emailed = ? WHERE id = ?",
+                    (*fields, row["id"]),
+                )
+                self.set_status("contacts", int(row["id"]), status)
+            keep.append(c["key"])
+        marks = ", ".join("?" for _ in keep)
+        self._con.execute(
+            f"DELETE FROM contacts WHERE group_id = ? AND linkedin_key NOT IN ({marks})", (group_id, *keep)
+        )
+        self._con.execute(
+            "UPDATE company_groups SET contact_cap = ?, contacts_picked = ? WHERE id = ?",
+            (cap, len(picked), group_id),
+        )
+
+    def picked_contacts(self, group_id: int) -> list[sqlite3.Row]:
+        return self._con.execute(
+            "SELECT * FROM contacts WHERE group_id = ? ORDER BY position", (group_id,)
+        ).fetchall()
+
+    def set_contact_email(self, contact_id: int, address: str) -> None:
+        """Attach the revealed (Unverified) address to a Contact."""
+        self._con.execute("UPDATE contacts SET email = ? WHERE id = ?", (address.lower(), contact_id))
+
+    def mark_emailed(self, contact_id: int, at: str) -> None:
+        """Record that this Contact was emailed (ISO 8601 time); it starts their cooldown."""
+        self._con.execute("UPDATE contacts SET emailed_at = ? WHERE id = ?", (at, contact_id))
+
+    def last_emailed(self, run_id: int) -> dict[str, datetime]:
+        """When each person (by LinkedIn key) was last emailed in any other Run, at any company."""
+        rows = self._con.execute(
+            "SELECT linkedin_key, emailed_at FROM contacts WHERE emailed_at IS NOT NULL AND run_id != ?",
+            (run_id,),
+        ).fetchall()
+        latest: dict[str, datetime] = {}
+        for row in rows:
+            at = datetime.fromisoformat(row["emailed_at"])
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=UTC)
+            if row["linkedin_key"] not in latest or at > latest[row["linkedin_key"]]:
+                latest[row["linkedin_key"]] = at
+        return latest
+
+    def add_bounces(self, bounces: list[dict[str, str]], today: str) -> None:
+        for b in bounces:
+            self._con.execute(
+                "INSERT INTO bounces (address, bounced_at, note, recorded_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (address) DO UPDATE SET bounced_at = excluded.bounced_at, note = excluded.note",
+                (b["address"], b["bounced_at"] or today, b["note"], _now()),
+            )
+
+    def is_bounced(self, address: str) -> bool:
+        return self._con.execute("SELECT 1 FROM bounces WHERE address = ?", (address.lower(),)).fetchone() is not None
+
+    def bounced_people(self) -> set[str]:
+        """LinkedIn keys of people whose known address has bounced."""
+        rows = self._con.execute(
+            "SELECT DISTINCT c.linkedin_key FROM contacts c JOIN bounces b ON b.address = lower(c.email)"
+        ).fetchall()
+        return {row["linkedin_key"] for row in rows}
 
     def _delete_missing(self, table: str, column: str, run_id: int, keep: list[str]) -> None:
         marks = ", ".join("?" for _ in keep)
