@@ -38,6 +38,21 @@ def make_app(company: str, title: str, score: int | None = 80, **over: Any) -> d
     return app
 
 
+def make_contact(name: str, title: str = "Software Engineer", company: str = "Acme",
+                 group: str = "beyond_network", **over: Any) -> dict[str, Any]:
+    """A synthetic Contact candidate as Claude would write it (no address, no real person)."""
+    slug = name.lower().replace(" ", "-")
+    contact: dict[str, Any] = {
+        "name": name,
+        "title": title,
+        "company": company,
+        "linkedin_url": f"https://www.linkedin.com/in/{slug}",
+        "group": group,
+    }
+    contact.update(over)
+    return contact
+
+
 @dataclass
 class Result:
     code: int
@@ -57,6 +72,13 @@ class Env:
         doc = {"run_date": TODAY, "timezone": "America/Los_Angeles", "applications": apps, **top}
         (self.run_dir / "applications.json").write_text(json.dumps(doc))
 
+    def write_candidates(self, by_company: dict[str, list[dict[str, Any]]]) -> None:
+        doc = {"companies": [{"company": c, "contacts": cs} for c, cs in by_company.items()]}
+        (self.run_dir / "contact_candidates.json").write_text(json.dumps(doc))
+
+    def write_bounces(self, bounces: list[dict[str, Any]]) -> None:
+        (self.run_dir / "bounces.json").write_text(json.dumps({"bounces": bounces}))
+
     def write_config(self, toml: str) -> None:
         self.config.write_text(toml)
 
@@ -71,6 +93,31 @@ class Env:
             code = int(e.code or 0)
         cap = self.capsys.readouterr()
         return Result(code, cap.out, cap.err)
+
+    def _run(self, argv: list[str]) -> Result:
+        try:
+            code = main(argv)
+        except SystemExit as e:  # argparse errors
+            code = int(e.code or 0)
+        cap = self.capsys.readouterr()
+        return Result(code, cap.out, cap.err)
+
+    def pick_contacts(self, *extra: str, now: str = NOW) -> Result:
+        return self._run([
+            "pick-contacts", str(self.run_dir),
+            "--config", str(self.config), "--db", str(self.db), "--now", now, *extra,
+        ])
+
+    def record_bounces(self, *extra: str) -> Result:
+        return self._run(["record-bounces", str(self.run_dir), "--db", str(self.db), *extra])
+
+    def picked_json(self) -> dict[str, Any]:
+        return json.loads((self.run_dir / "picked_contacts.json").read_text())  # type: ignore[no-any-return]
+
+    def picked_names(self, company: str) -> list[str]:
+        """Names of the picked Contacts for one company, in pick order."""
+        [group] = [g for g in self.picked_json()["groups"] if g["company"] == company]
+        return [c["name"] for c in group["contacts"]]
 
     def shortlist_json(self) -> dict[str, Any]:
         return json.loads((self.run_dir / "shortlist.json").read_text())  # type: ignore[no-any-return]
