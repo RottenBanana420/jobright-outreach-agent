@@ -123,7 +123,10 @@ class Store:
         self._con.execute("PRAGMA foreign_keys = ON")
         self._con.executescript(_SCHEMA)
         self._add_missing_columns("company_groups", {"contact_cap": "INTEGER", "contacts_picked": "INTEGER"})
-        self._add_missing_columns("runs", {"dry_run": "INTEGER NOT NULL DEFAULT 0"})
+        self._add_missing_columns("runs", {
+            "dry_run": "INTEGER NOT NULL DEFAULT 0",
+            "owner_pid": "INTEGER", "caffeinate_pid": "INTEGER", "claude_pid": "INTEGER",
+        })
         self._add_missing_columns("events", {"kind": "TEXT NOT NULL DEFAULT 'status'"})
         self._rename_status("outreach_emails", "drafted", "written")
 
@@ -458,3 +461,21 @@ class Store:
 
     def set_email_block(self, email_id: int, reason: str | None) -> None:
         self._con.execute("UPDATE outreach_emails SET block_reason = ? WHERE id = ?", (reason, email_id))
+
+    # --- Run lifecycle: `outreach start` / `stop` (ticket #6) -----------------------------------
+
+    def set_run_processes(self, run_id: int, owner_pid: int | None, caffeinate_pid: int | None,
+                          claude_pid: int | None) -> None:
+        """Remember the processes of a live Run: `outreach start` itself, its `caffeinate` and its Claude Code."""
+        self._con.execute(
+            "UPDATE runs SET owner_pid = ?, caffeinate_pid = ?, claude_pid = ? WHERE id = ?",
+            (owner_pid, caffeinate_pid, claude_pid, run_id),
+        )
+
+    def runs_with_processes(self) -> list[sqlite3.Row]:
+        return self._con.execute("SELECT * FROM runs WHERE owner_pid IS NOT NULL ORDER BY id").fetchall()
+
+    def run_has_emails(self, run_id: int) -> bool:
+        return self._con.execute(
+            "SELECT 1 FROM outreach_emails WHERE run_id = ? LIMIT 1", (run_id,)
+        ).fetchone() is not None

@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from outreach.config import load_config
+from outreach.config import Config, load_config
 from outreach.contacts import pick_contacts
 from outreach.emails import prepare_emails
 from outreach.errors import UserError
+from outreach.resume import resume_path, variant_for
+from outreach.run import Launcher, SystemLauncher, start_run, stop_run
 from outreach.schema import (
     load_applications,
     load_bounces,
@@ -26,7 +28,7 @@ from outreach.store import DEFAULT_PATH as DEFAULT_DB
 from outreach.store import Store
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, launcher: Launcher | None = None) -> int:
     parser = argparse.ArgumentParser(prog="outreach")
     sub = parser.add_subparsers(dest="command", required=True)
     shortlist_cmd = sub.add_parser("shortlist", help="rank Today's Applications into a Shortlist")
@@ -51,6 +53,20 @@ def main(argv: list[str] | None = None) -> int:
     prepare_cmd.add_argument("--config", type=Path)
     prepare_cmd.add_argument("--db", type=Path)
     prepare_cmd.add_argument("--now", help="override the current time (ISO 8601)")
+    start_cmd = sub.add_parser("start", help="start a Run: keep the Mac awake, open Claude Code")
+    start_cmd.add_argument("--contacts", type=int, help="override contacts_per_company for this Run")
+    start_cmd.add_argument("--dry-run", action="store_true", help="no Gmail drafts and nothing can be sent")
+    start_cmd.add_argument("--data-dir", type=Path, default=Path("data"), help="folder holding one folder per Run date")
+    start_cmd.add_argument("--config", type=Path)
+    start_cmd.add_argument("--db", type=Path)
+    start_cmd.add_argument("--now", help="override the current time (ISO 8601), e.g. to replay a past day")
+    stop_cmd = sub.add_parser("stop", help="cancel the Run in progress")
+    stop_cmd.add_argument("--db", type=Path)
+    review_cmd = sub.add_parser("review", help="serve the review page of a Run whose emails are already prepared")
+    review_cmd.add_argument("run_dir", type=Path)
+    review_cmd.add_argument("--port", type=int, default=0, help="review page port on 127.0.0.1 (default: free)")
+    review_cmd.add_argument("--config", type=Path)
+    review_cmd.add_argument("--db", type=Path)
     config_cmd = sub.add_parser("config", help="print the effective settings")
     config_cmd.add_argument("--config", type=Path)
     args = parser.parse_args(argv)
@@ -59,12 +75,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "config":
             print(json.dumps(load_config(args.config).as_dict(), indent=2))
             return 0
+        if args.command == "start":
+            return _start(args, launcher or SystemLauncher())
+        if args.command == "stop":
+            return stop_run(args.db or DEFAULT_DB, launcher or SystemLauncher())
         if args.command == "pick-contacts":
             return _pick_contacts(args)
         if args.command == "record-bounces":
             return _record_bounces(args)
         if args.command == "prepare":
-            return _prepare(args)
+            return _prepare(args, launcher or SystemLauncher())
+        if args.command == "review":
+            return _review(args, launcher or SystemLauncher())
         return _shortlist(args)
     except (OSError, sqlite3.Error) as e:
         print(f"outreach: error: cannot read or write files: {e}", file=sys.stderr)
@@ -84,6 +106,19 @@ def _require_run(store: Store, run_dir: Path) -> sqlite3.Row:
     if run is None:
         raise UserError(f"{run_dir}: no Shortlist recorded for this Run; run `outreach shortlist` first")
     return run
+
+
+def _start(args: argparse.Namespace, launcher: Launcher) -> int:
+    config = load_config(args.config)
+    options = {"db": _path(args.db), "config": _path(args.config), "now": args.now}
+    return start_run(
+        args.db or DEFAULT_DB, config, launcher, data_dir=args.data_dir, now=_now(args, ZoneInfo(config.timezone)),
+        contacts=args.contacts, dry_run=args.dry_run, options=options,
+    )
+
+
+def _path(path: Path | None) -> str | None:
+    return str(path) if path else None
 
 
 def _shortlist(args: argparse.Namespace) -> int:
@@ -132,10 +167,13 @@ def _pick_contacts(args: argparse.Namespace) -> int:
             )
             store.record_picks(run["id"], group["id"], cap, picks.picked, picks.flagged)
             rows = store.picked_contacts(group["id"])
+            variant = variant_for(store.group_applications(group["id"])[0]["title"])
             out_groups.append({
                 "company": group["name"],
                 "rank": group["rank"],
                 "picked_of_cap": f"{len(picks.picked)} of {cap}",
+                "resume_variant": variant,
+                "resume_file": str(resume_path(config, variant)),
                 "contacts": [_contact_out(r) for r in rows if r["status"] == "picked"],
                 "review": [_contact_out(r) for r in rows if r["status"] == "flagged"],
             })
@@ -165,7 +203,7 @@ def _record_bounces(args: argparse.Namespace) -> int:
     return 0
 
 
-def _prepare(args: argparse.Namespace) -> int:
+def _prepare(args: argparse.Namespace, launcher: Launcher) -> int:
     config = load_config(args.config)
     addresses = load_revealed_addresses(args.run_dir / "revealed_addresses.json")
     emails = load_written_emails(args.run_dir / "written_emails.json")
@@ -185,6 +223,27 @@ def _prepare(args: argparse.Namespace) -> int:
         print("work-humanizer check skipped (humanizer_check is not set or not available)")
     if args.no_serve:
         return 0
+    return _serve_review(db_path, config, run_id, args.port, launcher)
+
+
+def _review(args: argparse.Namespace, launcher: Launcher) -> int:
+    config = load_config(args.config)
+    db_path = args.db or DEFAULT_DB
+    with closing(Store(db_path)) as store:
+        run = _require_run(store, args.run_dir)
+        if not store.run_has_emails(run["id"]):
+            raise UserError(f"{args.run_dir}: no Outreach Emails prepared for this Run; run `outreach prepare` first")
+        run_id = int(run["id"])
+    return _serve_review(db_path, config, run_id, args.port, launcher)
+
+
+def _serve_review(db_path: Path, config: Config, run_id: int, port: int, launcher: Launcher) -> int:
     from outreach.review import serve
 
-    return serve(db_path, config, run_id, port=args.port)
+    with closing(Store(db_path)) as store:
+        waiting = sum(1 for e in store.run_emails(run_id) if e["status"] == "written")
+
+    def notify(url: str) -> None:
+        launcher.notify("Outreach review ready", f"{waiting} email(s) to review at {url}")
+
+    return serve(db_path, config, run_id, port=port, on_ready=notify)

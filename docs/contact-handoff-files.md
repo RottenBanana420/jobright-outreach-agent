@@ -50,6 +50,8 @@ Writes `picked_contacts.json`, which tells Claude whose addresses to reveal (onl
       "company": "Acme",
       "rank": 1,
       "picked_of_cap": "7 of 10",
+      "resume_variant": "software",
+      "resume_file": "/path/to/resumes/Kusai_Hajuri_Resume_Software_Engineer.pdf",
       "contacts": [
         {"id": 12, "name": "Sam Example", "title": "Senior Software Engineer", "category": "Engineer",
          "linkedin_url": "https://www.linkedin.com/in/sam-example", "groups": ["school", "previous_company"],
@@ -60,6 +62,8 @@ Writes `picked_contacts.json`, which tells Claude whose addresses to reveal (onl
   ]
 }
 ```
+
+`resume_variant` and `resume_file` are the Resume Variant `prepare` will attach for the group (first-match-wins on its best role, see [design.md](design.md)). Claude reads that file to write the group's emails, so the emails and the attachment agree.
 
 `review` holds cooldown-flagged Contacts, with `cooldown_last_emailed` set. `id` is the SQLite `contacts.id`.
 
