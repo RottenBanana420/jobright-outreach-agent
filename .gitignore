@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# Secrets: Gmail OAuth client and tokens, env files
+.env
+.env.*
+!.env.example
+credentials.json
+client_secret*.json
+token.json
+*.token
+
+# Personal data: never commit resumes, contacts, or outreach state
+resumes/
+*.pdf
+data/
+*.db
+*.sqlite
+*.sqlite3
+exports/
+logs/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
