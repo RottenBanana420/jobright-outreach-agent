@@ -111,6 +111,23 @@ class Env:
     def record_bounces(self, *extra: str) -> Result:
         return self._run(["record-bounces", str(self.run_dir), "--db", str(self.db), *extra])
 
+    def write_revealed(self, addresses: list[dict[str, Any]]) -> None:
+        (self.run_dir / "revealed_addresses.json").write_text(json.dumps({"addresses": addresses}))
+
+    def write_emails(self, emails: list[dict[str, Any]]) -> None:
+        (self.run_dir / "written_emails.json").write_text(json.dumps({"emails": emails}))
+
+    def prepare(self, *extra: str, now: str = NOW) -> Result:
+        return self._run([
+            "prepare", str(self.run_dir), "--no-serve",
+            "--config", str(self.config), "--db", str(self.db), "--now", now, *extra,
+        ])
+
+    def contact_ids(self, company: str = "Acme") -> dict[str, int]:
+        """Picked Contact ids by name, from `picked_contacts.json`."""
+        [group] = [g for g in self.picked_json()["groups"] if g["company"] == company]
+        return {c["name"]: c["id"] for c in group["contacts"]}
+
     def picked_json(self) -> dict[str, Any]:
         return json.loads((self.run_dir / "picked_contacts.json").read_text())  # type: ignore[no-any-return]
 
@@ -139,3 +156,69 @@ def env(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Env:
 
 
 AppFactory = Callable[..., dict[str, Any]]
+
+# --- revealed addresses, written emails, resumes (ticket #4) -------------------------------------
+
+TINY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
+VARIANT_FILES = {
+    "forward_deployed": "Resume_Forward_Deployed_Engineer.pdf",
+    "ml": "Resume_ML_Engineer.pdf",
+    "ai": "Resume_AI_Engineer.pdf",
+    "data": "Resume_Data_Engineer.pdf",
+    "software": "Resume_Software_Engineer.pdf",
+}
+
+
+def make_body(role: str = "Backend Engineer", words: int = 100) -> str:
+    """A synthetic Outreach Email body that passes the lint: right length, names the role, says "applied"."""
+    head = f"I recently applied for the {role} role at your company and wanted to introduce myself."
+    filler = " ".join(["Thanks"] * (words - len(head.split())))
+    return f"{head} {filler}"
+
+
+def make_email(contact_id: int, address: str, role: str = "Backend Engineer", **over: Any) -> dict[str, Any]:
+    email: dict[str, Any] = {
+        "contact_id": contact_id,
+        "to": [address],
+        "subject": f"Applied for {role}",
+        "body": make_body(role),
+    }
+    email.update(over)
+    return email
+
+
+def write_resumes(directory: Path, skip: tuple[str, ...] = ()) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for variant, name in VARIANT_FILES.items():
+        if variant not in skip:
+            (directory / name).write_bytes(TINY_PDF)
+
+
+def resume_config(directory: Path, extra: str = "") -> str:
+    files = "\n".join(f'{k} = "{v}"' for k, v in VARIANT_FILES.items())
+    return f'{extra}\nresume_dir = "{directory}"\n\n[resume_files]\n{files}\n'
+
+
+def prepared_inputs(env: Env, roles: list[tuple[str, int]] | None = None, contacts: int = 2,
+                    extra_config: str = "", company: str = "Acme") -> dict[str, int]:
+    """Shortlist and pick Contacts for one company, with resumes on disk. Returns Contact ids by name.
+
+    `roles` are (title, match score) pairs for the Company Group's Applications.
+    """
+    write_resumes(env.root / "resumes")
+    env.write_config(resume_config(env.root / "resumes", extra_config))
+    env.write_apps([make_app(company, t, s) for t, s in (roles or [("Backend Engineer", 90)])])
+    assert env.shortlist().code == 0
+    env.write_candidates({company: [make_contact(f"Eng {i}", company=company) for i in range(contacts)]})
+    assert env.pick_contacts().code == 0
+    return env.contact_ids(company)
+
+
+def address_for(name: str, domain: str = "acme.test") -> str:
+    return f"{name.lower().replace(' ', '.')}@{domain}"
+
+
+def write_for_all(env: Env, ids: dict[str, int], role: str = "Backend Engineer", **over: Any) -> None:
+    """Reveal an address and write one passing email for each picked Contact."""
+    env.write_revealed([{"contact_id": i, "address": address_for(n)} for n, i in ids.items()])
+    env.write_emails([make_email(i, address_for(n), role, **over) for n, i in ids.items()])

@@ -7,3 +7,12 @@ resume_dir = "resumes"
 sender = ""                     # your Gmail address
 send_pause_seconds = 30
 model = "sonnet"
+humanizer_check = ""            # optional: path to the work-humanizer check script (see docs/review-handoff-files.md)
+
+# Resume Variant -> file name inside resume_dir. These are the defaults; override any of them.
+[resume_files]
+forward_deployed = "Kusai_Hajuri_Resume_Forward_Deployed_Engineer.pdf"
+ml = "Kusai_Hajuri_Resume_ML_Engineer.pdf"
+ai = "Kusai_Hajuri_Resume_AI_Engineer.pdf"
+data = "Kusai_Hajuri_Resume_Data_Engineer.pdf"
+software = "Kusai_Hajuri_Resume_Software_Engineer.pdf"
