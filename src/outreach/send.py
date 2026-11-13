@@ -146,7 +146,7 @@ def _send_one(store: Store, gmail: Gmail, config: Config, row: sqlite3.Row, repo
             _mark_sent(store, gmail, row, found.gmail_id, report)
             return False
     try:
-        # A draft that is gone may have been consumed by an earlier attempt: only a never-attempted email gets a new one.
+        # A gone draft may have been consumed by an earlier attempt: only a never-attempted email gets a new one.
         draft_id = refresh_draft(store, gmail, config, row["id"], recreate=row["status"] == "ready_to_send")
     except GmailNotFound:
         _check_by_hand(store, row, report)
