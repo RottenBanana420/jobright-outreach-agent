@@ -13,4 +13,5 @@ Read by the reviewer, not the implementer. Ruff, mypy and pytest (see `.github/w
 - **In flight means ready**: set an email to `sending` only after the draft and attachment are ready, so a local failure never leaves it looking half-sent.
 - **Skipped rows still count**: a rule that skips locked emails (sent, sending) still registers their address for duplicate checks.
 - **Best-effort side effects**: a notification or any other convenience never aborts the Run.
-- **Tests never reach the real launcher**: tests pass `FakeLauncher` to `main()`. A conftest guard fails any test that reaches the real caffeinate, Claude Code or osascript; mark a test `real_launcher` only when it runs the real one on harmless input.
+- **Tests never reach the real launcher**: every outside process (caffeinate, Claude Code, osascript, `open`, the setup wizard) is a `Launcher` method, and tests pass `FakeLauncher` to `main()`. Ruff bans `subprocess` outside `run.py` and the humanizer check; the conftest guard fails any test that reaches a real `Launcher` method. Mark a test `real_launcher` only when it runs the real one on harmless input.
+- **"Undelivered" on screen, `bounce` in code**: menu and CLI text tells the user an email was undelivered; names, statuses and docs keep `bounce`.

@@ -22,4 +22,4 @@ Reviewers check the diff against `CODING_STANDARDS.md`, `GLOSSARY.md` and `docs/
 
 ## Handoff files
 
-Before reading or writing a file that passes between Claude and the CLI (applications, contact candidates, picked contacts, revealed addresses, written emails, bounces), read the shapes in `docs/contact-handoff-files.md` and `docs/review-handoff-files.md`. The latter also holds the humanizer check contract. `docs/run-files.md` covers `outreach start` / `stop`, `run_state.json` and resuming.
+Before reading or writing a file that passes between Claude and the CLI (applications, contact candidates, picked contacts, revealed addresses, written emails, bounces), read the shapes in `docs/contact-handoff-files.md` and `docs/review-handoff-files.md`. The latter also holds the humanizer check contract. `docs/run-files.md` covers `outreach start` / `stop`, `run_state.json`, resuming and the no-command menu. Before reading Outreach Email statuses (a menu, a report), read `docs/review-handoff-files.md`: a dry run's confirmation leaves emails `approved`.

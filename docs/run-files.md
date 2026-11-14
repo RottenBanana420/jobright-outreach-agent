@@ -72,6 +72,6 @@ One flat list, no sub-menus, no follow-up questions and no "are you sure" (the r
 
 After an action returns (`start` included, during which Claude Code owns the terminal), the menu shows again with the new status. Ctrl-C during an action ends the action, not the menu. Every command keeps its arguments; the menu only calls them with the defaults (`data`, `data/outreach.db`, `outreach.toml`).
 
-With no command and no terminal (stdin or stdout not a tty), `outreach` prints the usual help and exits 2. It never waits for input.
+With no command and no terminal (stdin or stdout not a tty), `outreach` prints the usual help and exits 2. It never waits for input. To see the real prompt from a shell with no terminal, give it one: `(sleep 2; printf q) | script -q /dev/null ./outreach`. Tests drive the prompt through a prompt_toolkit pipe input instead (`tests/test_menu.py`).
 
 `outreach gmail-auth` saves `signed_in_at` (UTC, ISO 8601) in the token file. A token without it still loads.
