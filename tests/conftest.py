@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from fake_gmail import FakeGmail
 from outreach.cli import main
 
 # 2026-11-13 02:00 UTC is still 2026-11-12 in America/Los_Angeles.
@@ -67,6 +68,7 @@ class Env:
     db: Path
     config: Path
     capsys: pytest.CaptureFixture[str]
+    gmail: FakeGmail
 
     def write_apps(self, apps: list[dict[str, Any]], **top: Any) -> None:
         doc = {"run_date": TODAY, "timezone": "America/Los_Angeles", "applications": apps, **top}
@@ -88,7 +90,7 @@ class Env:
             "--config", str(self.config), "--db", str(self.db), "--now", now, *extra,
         ]
         try:
-            code = main(argv)
+            code = main(argv, gmail=self.gmail)
         except SystemExit as e:  # argparse errors
             code = int(e.code or 0)
         cap = self.capsys.readouterr()
@@ -96,7 +98,7 @@ class Env:
 
     def _run(self, argv: list[str]) -> Result:
         try:
-            code = main(argv)
+            code = main(argv, gmail=self.gmail)
         except SystemExit as e:  # argparse errors
             code = int(e.code or 0)
         cap = self.capsys.readouterr()
@@ -122,6 +124,9 @@ class Env:
             "prepare", str(self.run_dir), "--no-serve",
             "--config", str(self.config), "--db", str(self.db), "--now", now, *extra,
         ])
+
+    def send(self, *extra: str) -> Result:
+        return self._run(["send", str(self.run_dir), "--config", str(self.config), "--db", str(self.db), *extra])
 
     def contact_ids(self, company: str = "Acme") -> dict[str, int]:
         """Picked Contact ids by name, from `picked_contacts.json`."""
@@ -152,7 +157,7 @@ class Env:
 def env(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Env:
     run_dir = tmp_path / "data" / TODAY
     run_dir.mkdir(parents=True)
-    return Env(tmp_path, run_dir, tmp_path / "outreach.db", tmp_path / "outreach.toml", capsys)
+    return Env(tmp_path, run_dir, tmp_path / "outreach.db", tmp_path / "outreach.toml", capsys, FakeGmail())
 
 
 AppFactory = Callable[..., dict[str, Any]]
@@ -211,7 +216,8 @@ def write_resumes(directory: Path, skip: tuple[str, ...] = ()) -> None:
 
 def resume_config(directory: Path, extra: str = "") -> str:
     files = "\n".join(f'{k} = "{v}"' for k, v in VARIANT_FILES.items())
-    return f'{extra}\nresume_dir = "{directory}"\n\n[resume_files]\n{files}\n'
+    head = f'{extra}\nsender = "me@example.test"\nsend_pause_seconds = 0\nresume_dir = "{directory}"'
+    return f"{head}\n\n[resume_files]\n{files}\n"
 
 
 def prepared_inputs(env: Env, roles: list[tuple[str, int]] | None = None, contacts: int = 2,

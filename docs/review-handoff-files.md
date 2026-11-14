@@ -34,7 +34,11 @@ Needs `shortlist` and `pick-contacts` to have run on the folder. In one transact
 4. chooses the Resume Variant from the group's best role (open jobs by Match Score, then closed) with the first-match-wins table in [design.md](design.md), and checks the file: it exists, is at most 25 MB, starts with `%PDF-`, and ends with `startxref <offset> %%EOF` where the offset leads to an `xref` table or an `N G obj` cross-reference stream (stdlib check; a truncated or damaged file fails it). Title matching reads hyphens and underscores as spaces (`Forward-Deployed`, `Machine-Learning`), and `MLOps` counts as ML. A bad file does not fail `prepare`: the email is stored with a `block_reason` and cannot be approved until another Resume Variant is chosen;
 5. lints the email (findings stored as JSON, shown on the page, do not block Approval): word count outside 80 to 140, an exact role title of the group missing from the body (one finding per missing role), no "applied", address domain not matching the company.
 
-Then it starts the review page on `127.0.0.1` (printing the URL) and runs until the final confirmation or Ctrl-C. `--no-serve` prepares and exits. `--dry-run` is stored on the Run: the page works fully, but confirming only checks the totals and marks nothing.
+6. unless `--dry-run`, creates a Gmail draft for each email that has a usable resume (see [Gmail](#gmail-drafts-and-sending)). A dry run touches Gmail not at all and needs no `sender`.
+
+Then it starts the review page on `127.0.0.1` (printing the URL) and runs until the final confirmation or Ctrl-C. `--no-serve` prepares and exits. `--dry-run` is stored on the Run: the page works fully, but confirming only checks the totals and marks nothing. After a real confirmation `prepare` sends straight away (below).
+
+Running `prepare` again leaves emails that are already `ready_to_send` or later (sent, failed, uncertain) alone and says so.
 
 ### Config
 
@@ -45,9 +49,10 @@ Then it starts the review page on `127.0.0.1` (printing the URL) and runs until 
 ## SQLite
 
 - `outreach_emails`: `run_id`, `contact_id`, `group_id` (unique together), `address`, `subject`, `body`, `content_hash`, `resume_variant`, `resume_path`, `block_reason`, `findings`, `status`, `created_at`.
-- Statuses (only through `Store.set_status`, each with an `events` row): `written`, `approved`, `rejected`, `skipped`, then `ready_to_send` once the user confirms. The sender (#5/#6) takes it from `ready_to_send` to `sending`, `sent`, `failed` or `uncertain`. `LOCKED` in `emails.py` lists the statuses from `ready_to_send` on; the review page cannot change those.
+- Statuses (only through `Store.set_status`, each with an `events` row): `written`, `approved`, `rejected`, `skipped`, then `ready_to_send` once the user confirms. `outreach send` takes it from `ready_to_send` to `sending`, then `sent`, `failed` or `uncertain`. `LOCKED` in `emails.py` lists the statuses from `ready_to_send` on; the review page cannot change those.
 - `events.kind` is `status` or `edit`. Edits and resume switches are `edit` events (the status columns repeat the current status).
 - Editing or switching the resume of an approved email sends it back to `written`. `drafted`, the name used in the first version of this ticket, became `written` (the glossary avoids an unqualified "Draft"); an existing database is upgraded in place, rows and events, when opened.
+- `outreach_emails` also holds `draft_id` (Gmail draft), `message_id` (the unique Message-ID header, `<hex@sender-domain>`), `gmail_message_id` and `sent_at` (the proof of a send) and `labelled`.
 - `runs.dry_run`.
 
 ## Review page (HTTP, localhost only)
@@ -55,3 +60,45 @@ Then it starts the review page on `127.0.0.1` (printing the URL) and runs until 
 Every shortlisted Company Group is listed, including one with no Outreach Email ("0 of N"), with its "N of M" shortfall. Contacts that get no email are listed under their group with the reason: cooldown (with the last-emailed date), address bounced before, or same address as another Contact. The Approval section says how many emails wait for review and how many of those have a blocked resume.
 
 `GET /`, and `POST` (form-encoded, with the page's hidden `token`): `/emails/<id>/edit` (`subject`, `body`), `/emails/<id>/approve|reject|skip`, `/groups/<id>/resume` (`variant`), `/bulk-approve` (approves every `written` email that has no blocked resume; findings do not block Approval), `/confirm-send` (`emails` and `recipients`, which must equal the approved totals shown). Errors: 400 bad input, 403 bad token, Host or Origin, 404 unknown, 409 not allowed (blocked resume, locked email, totals mismatch, nothing approved).
+
+## Gmail drafts and sending
+
+The Gmail adapter (`outreach.gmail.Gmail`) is the only external seam: `create_draft`, `update_draft`, `send_draft`, `find_sent` (by Message-ID) and `add_label`. `outreach.gmail_api.RealGmail` calls the official Gmail REST API (standard library only); tests use an in-memory fake with scripted failures. Both build the message with `build_mime`: From the configured `sender`, one `To`, no Cc or Bcc, the Resume Variant PDF read from disk (never through the model), a unique Message-ID.
+
+### Setup (once)
+
+1. In Google Cloud, create a project, enable the Gmail API, configure the OAuth consent screen, and create an OAuth client of type **Desktop app**. Save its JSON as `credentials.json` (gitignored) or point `gmail_credentials` at it. While the consent screen is in "Testing" Google expires the refresh token every 7 days; `outreach gmail-auth` then needs repeating.
+2. Set `sender` in `outreach.toml` to the Gmail address.
+3. `outreach gmail-auth` opens the browser, saves the token to `gmail_token` (default `data/gmail_token.json`, gitignored, mode 600) and prints the authorized address.
+
+Scope: `https://www.googleapis.com/auth/gmail.modify`. It is the narrowest single scope that covers drafts, send, listing Sent and labelling: `gmail.compose` cannot list or label messages, and `gmail.labels` cannot label a message.
+
+An expired or revoked token, or a missing one, stops with a message that says to run `outreach gmail-auth`.
+
+### Drafts
+
+- `prepare` (not dry-run) creates one draft per email. Each draft id is saved as soon as Gmail returns it, so a failure part way (auth, timeout) leaves the earlier drafts recorded and a second `prepare` carries on. A timeout on creation may leave a stray draft in Gmail that nothing records; it is never sent.
+- An email with a blocked resume gets no draft until its Resume Variant is switched.
+- Review page edits and resume switches are saved first (one transaction), then copied to the drafts with no transaction open, each new draft id saved as soon as Gmail returns it. If Gmail fails, the change stays saved, the page says so (HTTP 502) and the draft is behind until the next edit or until the sender refreshes it. In a dry run they never touch Gmail.
+- The sender refreshes the draft from the Store right before sending, so what was approved is what goes out, even if an earlier draft update failed half way.
+- A draft that no longer exists in Gmail (deleted by hand) is made again, with a new Message-ID, on the next edit or refresh. The sender does this only for an email that was never attempted (`ready_to_send`). After an attempt it may have consumed the draft, so a missing draft leaves the email `uncertain` instead (see below).
+
+### `outreach send <run-dir> [--config] [--db]`
+
+Sends the emails the user confirmed (`ready_to_send`), one at a time, `send_pause_seconds` apart. `prepare` runs it by itself after the final confirmation; run it by hand to resume. It refuses (exit 2) for a dry run and when no email is confirmed and waiting. Rejected, skipped and unreviewed emails are never sent.
+
+- Success records `gmail_message_id`, `sent_at`, status `sent` ("Gmail accepted it", not "delivered"), starts the Contact's cooldown, then applies the Gmail label `Outreach` (created if missing). A label failure does not undo the send; a rerun labels it.
+- A timeout, dropped connection or 5xx answer marks the email `uncertain`, searches Sent for its Message-ID, and only if it is not there retries once (then searches again). Found means `sent`; no second send.
+- An auth or quota error marks the email `failed` and stops the batch. Another refusal marks it `failed` and the batch carries on. Unsent emails stay `ready_to_send`.
+- `sending` is set only once the draft is ready. A problem before that, including one that is not Gmail's (a resume file that was moved or deleted), marks that one email `failed` and the batch carries on.
+- A rerun first searches Sent for every email left `sending`, `uncertain` or `failed`, then sends what is not there.
+- The Sent search can miss a message that went out (see the check below). So when an email that may already have been attempted has no draft in Gmail any more, and Sent has no message with its Message-ID, the sender does not make a new draft and does not send. It leaves the email `uncertain`, reports "check Sent in Gmail by hand" and counts it as left (exit 3). Look in Gmail Sent for that recipient and subject: if it is there the email went out; if not, the draft was deleted by hand and the email has to be put back by hand in SQLite (there is no command for it yet).
+- Output lists what was sent and what is left. Exit codes: 0 everything sent, 2 refused or bad input, 3 something is left.
+
+### To verify by hand before real outreach (not covered by automated tests)
+
+1. That Gmail keeps our custom Message-ID on `drafts.send`, which `find_sent` (`rfc822msgid:` search in Sent) relies on. With a test account: run a Run with one email to yourself, then look at the sent message's "Show original" for the Message-ID and compare it with `outreach_emails.message_id`. If Gmail rewrote it, the duplicate-send protection by search does not work. The failure mode is safe: a timed-out send whose message cannot be found is not retried blindly. The retry meets a missing draft, and the email is left `uncertain` for a check by hand (above). It also means every ambiguous send needs that manual check.
+2. That the search finds the sent message, i.e. `find_sent` returns it for the id from step 1.
+3. That `drafts.update` and `drafts.send` on a deleted draft answer HTTP 404 (mapped to "not found"). The `uncertain` rule above depends on it.
+
+Tests cover the adapter's error mapping and the token file against a local HTTP server (`tests/test_gmail_api.py`), not Google itself.

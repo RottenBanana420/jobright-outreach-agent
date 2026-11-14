@@ -16,14 +16,16 @@ import re
 import secrets
 import sqlite3
 import urllib.parse
+from collections.abc import Callable
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
-from outreach import emails
+from outreach import drafts, emails
 from outreach.config import Config
 from outreach.errors import Conflict, UserError
+from outreach.gmail import Gmail, GmailError
 from outreach.store import Store
 
 HOST = "127.0.0.1"
@@ -54,8 +56,9 @@ def _e(value: object) -> str:
 
 
 class ReviewServer(HTTPServer):
-    def __init__(self, db_path: Path, config: Config, run_id: int, port: int) -> None:
+    def __init__(self, db_path: Path, config: Config, run_id: int, port: int, gmail: Gmail | None = None) -> None:
         super().__init__((HOST, port), _Handler)
+        self.gmail = gmail
         self.db_path = db_path
         self.config = config
         self.run_id = run_id
@@ -70,14 +73,21 @@ class ReviewServer(HTTPServer):
         self.server_close()
 
 
-def make_server(db_path: Path, config: Config, run_id: int, port: int = 0) -> ReviewServer:
-    return ReviewServer(db_path, config, run_id, port)
+def make_server(db_path: Path, config: Config, run_id: int, port: int = 0, gmail: Gmail | None = None) -> ReviewServer:
+    return ReviewServer(db_path, config, run_id, port, gmail)
 
 
-def serve(db_path: Path, config: Config, run_id: int, port: int = 0) -> int:
-    """Serve the review page until the final confirmation (or Ctrl-C)."""
-    server = make_server(db_path, config, run_id, port)
-    print(f"review page ready: http://{server.authority}/  (Ctrl-C to stop)", flush=True)
+def serve(db_path: Path, config: Config, run_id: int, port: int = 0, gmail: Gmail | None = None,
+          on_ready: Callable[[str], None] | None = None) -> bool:
+    """Serve the review page until the final confirmation (or Ctrl-C). `on_ready` gets the page's URL.
+
+    Returns whether the user confirmed.
+    """
+    server = make_server(db_path, config, run_id, port, gmail)
+    url = f"http://{server.authority}/"
+    print(f"review page ready: {url}  (Ctrl-C to stop)", flush=True)
+    if on_ready:
+        on_ready(url)
     server.timeout = 0.5
     try:
         while not server.confirmed:
@@ -86,7 +96,7 @@ def serve(db_path: Path, config: Config, run_id: int, port: int = 0) -> int:
         print("\nreview page stopped")
     finally:
         server.close()
-    return 0
+    return server.confirmed
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -157,8 +167,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = urllib.parse.urlsplit(self.path).path
         try:
-            with closing(Store(self.server.db_path)) as store, store.transaction():
-                location = self._act(store, path, form)
+            with closing(Store(self.server.db_path)) as store:
+                with store.transaction():
+                    location, to_sync = self._act(store, path, form)
+                self._sync_drafts(store, to_sync)  # after the commit: no Gmail call holds the database lock
+        except GmailError as e:
+            self._page(502, "Gmail problem", f"{e} (your change is saved; the Gmail draft is brought up to date "
+                                           "from it right before sending)")
         except Conflict as e:
             self._page(409, "Not allowed", str(e))
         except UserError as e:
@@ -179,7 +194,21 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send(303, "", location=location)
 
-    def _act(self, store: Store, path: str, form: dict[str, str]) -> str | None:
+    def _sync_drafts(self, store: Store, email_ids: list[int]) -> None:
+        """Copy a saved change to the Gmail drafts, outside any transaction.
+
+        The Store is the truth, so a Gmail failure raises but does not undo the change; each draft id that
+        was created before the failure is already saved, and the sender refreshes every draft before sending.
+        """
+        if store.get_run(self.server.run_id)["dry_run"]:
+            return  # dry run: no drafts exist
+        if self.server.gmail is None:
+            raise GmailError("Gmail is not connected")
+        for email_id in email_ids:
+            drafts.sync_draft(store, self.server.gmail, self.server.config, email_id)
+
+    def _act(self, store: Store, path: str, form: dict[str, str]) -> tuple[str | None, list[int]]:
+        """Do the change in the open transaction. Returns where to go next and the emails whose draft needs syncing."""
         run_id, config = self.server.run_id, self.server.config
         if m := re.fullmatch(r"/emails/(\d+)/(edit|approve|reject|skip)", path):
             email_id, action = int(m.group(1)), m.group(2)
@@ -188,26 +217,27 @@ class _Handler(BaseHTTPRequestHandler):
                 raise LookupError(f"Outreach Email {email_id} does not exist")
             if action == "edit":
                 emails.edit_email(store, config, email_id, form.get("subject", ""), form.get("body", ""))
-                return f"/?notice=edited#email-{email_id}"
+                return f"/?notice=edited#email-{email_id}", [email_id]
             emails.decide(store, email_id, {"approve": "approved", "reject": "rejected", "skip": "skipped"}[action])
-            return f"/?notice=decided#email-{email_id}"
+            return f"/?notice=decided#email-{email_id}", []
         if m := re.fullmatch(r"/groups/(\d+)/resume", path):
             group = store.get_group(int(m.group(1)))
             if group["run_id"] != run_id:
                 raise LookupError(f"Company Group {group['id']} does not exist")
             emails.switch_resume(store, config, int(group["id"]), form.get("variant", ""))
-            return f"/?notice=resume#group-{group['id']}"
+            sync = [int(r["id"]) for r in store.run_emails_for_group(int(group["id"]))]
+            return f"/?notice=resume#group-{group['id']}", sync
         if path == "/bulk-approve":
             approved, left = emails.bulk_approve(store, run_id)
-            return f"/?notice=bulk&n={approved}&left={left}"
+            return f"/?notice=bulk&n={approved}&left={left}", []
         if path == "/confirm-send":
             for name in ("emails", "recipients"):
                 if not form.get(name, "").strip().isdigit():
                     raise UserError(f"{name}: type the number shown on the page")
             emails.confirm_send(store, run_id, int(form["emails"]), int(form["recipients"]))
             self.server.confirmed = True
-            return "/?notice=dryrun" if store.get_run(run_id)["dry_run"] else "/?notice=confirmed"
-        return None
+            return ("/?notice=dryrun" if store.get_run(run_id)["dry_run"] else "/?notice=confirmed"), []
+        return None, []
 
 
 def _int(text: str) -> int:
@@ -299,6 +329,12 @@ def _render_flagged(contacts: list[sqlite3.Row]) -> str:
     return f'<div class="warn"><p>Flagged for review, no Outreach Email:</p><ul>{items}</ul></div>'
 
 
+def _drafts_note(group_rows: list[sqlite3.Row], dry: bool) -> str:
+    if dry:
+        return "none (dry run)"
+    return f"{sum(1 for r in group_rows if r['draft_id'])} of {len(group_rows)}"
+
+
 def render_page(store: Store, config: Config, run_id: int, token: str, notice: str = "") -> str:
     run = store.get_run(run_id)
     rows = store.run_emails(run_id)
@@ -329,7 +365,7 @@ def render_page(store: Store, config: Config, run_id: int, token: str, notice: s
         out.append(
             f'<section id="group-{group["id"]}"><h2>{_e(group["name"])} <small class="muted">Rank {group["rank"]}'
             f"</small></h2><p>Roles: {roles}</p><p>Contacts: {_e(picked)} &middot; "
-            + (f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: none (dry-run stage)</p>"
+            + (f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: {_drafts_note(group_rows, dry)}</p>"
                if group_rows else "no Outreach Emails for this Company Group</p>")
         )
         if group_rows:

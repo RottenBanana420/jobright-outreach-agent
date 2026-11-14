@@ -30,6 +30,7 @@ from conftest import (
     write_for_all,
     write_resumes,
 )
+from fakes import FakeLauncher
 from outreach.cli import main
 from outreach.config import load_config
 from outreach.review import make_server
@@ -70,7 +71,7 @@ class Page:
 @contextmanager
 def serving(env: Env) -> Iterator[Page]:
     config = load_config(env.config)
-    with closing(make_server(env.db, config, run_id=1, port=0)) as server:
+    with closing(make_server(env.db, config, run_id=1, port=0, gmail=env.gmail)) as server:
         thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         thread.start()
         host, port = "127.0.0.1", server.server_address[1]
@@ -485,7 +486,7 @@ def test_prepare_serves_the_review_page_until_the_final_confirmation(env: Env) -
     outcome: list[int] = []
     argv = ["prepare", str(env.run_dir), "--dry-run", "--port", str(port), "--config", str(env.config),
             "--db", str(env.db), "--now", NOW]
-    thread = Thread(target=lambda: outcome.append(main(argv)), daemon=True)
+    thread = Thread(target=lambda: outcome.append(main(argv, FakeLauncher())), daemon=True)
     thread.start()
 
     base = f"http://127.0.0.1:{port}"
