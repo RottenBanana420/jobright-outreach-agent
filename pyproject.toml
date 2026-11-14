@@ -3,7 +3,9 @@ name = "outreach"
 version = "0.1.0"
 description = "Daily Jobright outreach Run: state, ranking and Gmail in Python (see docs/design.md)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "questionary>=2.1.1",
+]
 
 [project.scripts]
 outreach = "outreach.cli:main"

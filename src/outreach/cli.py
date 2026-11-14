@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import subprocess
 import sys
 from contextlib import closing
 from datetime import UTC, datetime
@@ -10,12 +11,14 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from outreach.config import DEFAULT_PATH as CONFIG_FILE
 from outreach.config import Config, load_config
 from outreach.contacts import pick_contacts
 from outreach.drafts import sync_run_drafts
 from outreach.emails import prepare_emails
 from outreach.errors import UserError
 from outreach.gmail import Gmail
+from outreach.menu import GMAIL, PRACTICE, REVIEW, SEND, SETTINGS, SETUP, START, STOP, Ask, Menu, build_menu, menu_loop
 from outreach.resume import resume_path, variant_for
 from outreach.run import Launcher, SystemLauncher, mark_reviewed, start_run, stop_run
 from outreach.schema import (
@@ -31,9 +34,13 @@ from outreach.store import DEFAULT_PATH as DEFAULT_DB
 from outreach.store import Store
 
 
-def main(argv: list[str] | None = None, launcher: Launcher | None = None, *, gmail: Gmail | None = None) -> int:
+def main(
+    argv: list[str] | None = None, launcher: Launcher | None = None, *, gmail: Gmail | None = None,
+    ask: Ask | None = None,
+) -> int:
+    """The `outreach` command. With no command in a terminal it opens the menu; `ask` replaces the prompt in tests."""
     parser = argparse.ArgumentParser(prog="outreach")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
     shortlist_cmd = sub.add_parser("shortlist", help="rank Today's Applications into a Shortlist")
     shortlist_cmd.add_argument("run_dir", type=Path)
     shortlist_cmd.add_argument("--config", type=Path)
@@ -81,6 +88,11 @@ def main(argv: list[str] | None = None, launcher: Launcher | None = None, *, gma
     args = parser.parse_args(argv)
 
     try:
+        if args.command is None:
+            if ask is None and not (sys.stdin.isatty() and sys.stdout.isatty()):
+                parser.print_help()
+                return 2
+            return _menu(launcher or SystemLauncher(), gmail, ask)
         if args.command == "config":
             print(json.dumps(load_config(args.config).as_dict(), indent=2))
             return 0
@@ -107,6 +119,33 @@ def main(argv: list[str] | None = None, launcher: Launcher | None = None, *, gma
     except UserError as e:
         print(f"outreach: error: {e}", file=sys.stderr)
         return 2
+
+
+SETUP_WIZARD = Path("scripts/setup-wizard.sh")
+
+
+def _menu(launcher: Launcher, gmail: Gmail | None, ask: Ask | None) -> int:
+    """`outreach` with no command: the arrow-key menu, shown again after each action until Quit."""
+    from outreach.menu import ask_questionary
+
+    def build() -> Menu:
+        config = load_config(None)
+        return build_menu(
+            DEFAULT_DB, config, config_file=CONFIG_FILE, data_dir=Path("data"),
+            now=datetime.now(ZoneInfo(config.timezone)), is_alive=launcher.is_alive,
+        )
+
+    def act(choice: str, menu: Menu) -> None:
+        if choice == SETUP:
+            subprocess.run(["bash", str(SETUP_WIZARD)], check=False)
+            return
+        argv = {
+            START: ["start"], PRACTICE: ["start", "--dry-run"], REVIEW: ["review", str(menu.run_dir)],
+            SEND: ["send", str(menu.run_dir)], STOP: ["stop"], GMAIL: ["gmail-auth"], SETTINGS: ["config"],
+        }[choice]
+        main(argv, launcher, gmail=gmail)
+
+    return menu_loop(build, ask or ask_questionary, act)
 
 
 def _now(args: argparse.Namespace, zone: ZoneInfo) -> datetime:

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Same as `uv run outreach`: with no command, in a terminal, it opens the menu. Run it from the project folder.
+exec uv run outreach "$@"

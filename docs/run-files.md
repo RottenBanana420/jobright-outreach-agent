@@ -49,3 +49,29 @@ Once the page is up, `prepare` and `review` open its URL in the default browser 
 ## SQLite
 
 `runs.status`: `created`, `running`, then the stage markers (`shortlisted` ...), `reviewed` once the review page has closed during a live Run, and at the end `ended`, `failed` or `stopped` (each change with an `events` row). `runs.owner_pid`, `caffeinate_pid` and `claude_pid` are set only while a Run is live.
+
+## The menu: `outreach` with no command
+
+`./outreach` (a small script in the project folder that runs `uv run outreach "$@"`) or `uv run outreach`, in an interactive terminal, opens a Questionary select prompt. `outreach/menu.py` builds it from the Store, the config and the files (`build_menu`); the prompt itself is a thin layer on top. Nothing outside the project folder is changed: no aliases, no shell rc edits.
+
+The title line is the date and today's status (today's Run is `data/<date>`): `no Run yet`, `a Run is in progress in another window`, `send interrupted: N emails to finish`, `waiting for your review: N emails`, `started, not finished; Start picks up where it left off`, `all sent: N emails` or `done, nothing sent`. Below it: the Gmail sign-in (`day N of 7`, or just `signed in` for a token saved before the date was kept) and the addresses recorded as bounced today, worded "N emails undelivered; those addresses won't be used again". User-facing text says "undelivered"; the code and these docs keep `bounce`. There is no item for recording bounces: Claude records them at the start of every Run.
+
+One flat list, no sub-menus, no follow-up questions and no "are you sure" (the review page's totals confirmation is the gate). Daily items above the line, upkeep below. Items marked * show only when they apply.
+
+| Item | Runs | Shows | Pointer starts here when |
+|---|---|---|---|
+| Start today's Run | `outreach start` | always | there is no Run today, or it stopped before the emails were written |
+| Practice run (nothing is sent) | `outreach start --dry-run` | always | |
+| Reopen the review page* | `outreach review data/<date>` | emails are waiting for review | emails are waiting |
+| Finish an interrupted send* | `outreach send data/<date>` | confirmed emails are not all sent and labelled | a send was interrupted |
+| Stop the Run* | `outreach stop` | a Run is live in another window | never (one Enter must not stop it; the pointer rests on Quit) |
+| Finish setup* | `scripts/setup-wizard.sh` | `outreach.toml`, `credentials.json`, the Gmail token or a resume file is missing | setup is incomplete (this wins over everything) |
+| Renew Gmail sign-in | `outreach gmail-auth` | always | from day 6 of the 7-day sign-in (before a send or review) |
+| Show settings | `outreach config` | always | |
+| Quit | | always (`q` also quits, as does Ctrl-C) | today's Run is done |
+
+After an action returns (`start` included, during which Claude Code owns the terminal), the menu shows again with the new status. Ctrl-C during an action ends the action, not the menu. Every command keeps its arguments; the menu only calls them with the defaults (`data`, `data/outreach.db`, `outreach.toml`).
+
+With no command and no terminal (stdin or stdout not a tty), `outreach` prints the usual help and exits 2. It never waits for input.
+
+`outreach gmail-auth` saves `signed_in_at` (UTC, ISO 8601) in the token file. A token without it still loads.
