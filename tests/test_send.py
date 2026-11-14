@@ -10,6 +10,7 @@ from threading import Thread
 import pytest
 
 from conftest import NOW, Env, make_email, prepared_inputs, write_for_all
+from fakes import FakeLauncher
 from outreach.cli import main
 from outreach.gmail import GmailAuthError, GmailError, GmailQuotaError, GmailUncertain
 from test_gmail_drafts import attachments
@@ -343,7 +344,7 @@ def test_confirming_in_prepare_sends_straight_away(env: Env) -> None:
     outcome: list[int] = []
     argv = ["prepare", str(env.run_dir), "--port", str(port), "--config", str(env.config),
             "--db", str(env.db), "--now", NOW]
-    thread = Thread(target=lambda: outcome.append(main(argv, gmail=env.gmail)), daemon=True)
+    thread = Thread(target=lambda: outcome.append(main(argv, FakeLauncher(), gmail=env.gmail)), daemon=True)
     thread.start()
     base, html = f"http://127.0.0.1:{port}", ""
     for _ in range(200):

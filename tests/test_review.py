@@ -30,6 +30,7 @@ from conftest import (
     write_for_all,
     write_resumes,
 )
+from fakes import FakeLauncher
 from outreach.cli import main
 from outreach.config import load_config
 from outreach.review import make_server
@@ -485,7 +486,7 @@ def test_prepare_serves_the_review_page_until_the_final_confirmation(env: Env) -
     outcome: list[int] = []
     argv = ["prepare", str(env.run_dir), "--dry-run", "--port", str(port), "--config", str(env.config),
             "--db", str(env.db), "--now", NOW]
-    thread = Thread(target=lambda: outcome.append(main(argv)), daemon=True)
+    thread = Thread(target=lambda: outcome.append(main(argv, FakeLauncher())), daemon=True)
     thread.start()
 
     base = f"http://127.0.0.1:{port}"

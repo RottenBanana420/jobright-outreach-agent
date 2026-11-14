@@ -81,10 +81,13 @@ class SystemLauncher:
     def notify(self, title: str, message: str) -> None:
         # The text goes in as arguments, never into the script, so it cannot change what the script does.
         script = ["on run argv", "display notification (item 1 of argv) with title (item 2 of argv)", "end run"]
-        subprocess.run(
-            ["osascript", *[a for line in script for a in ("-e", line)], message, title],
-            stdin=subprocess.DEVNULL, capture_output=True, check=False,
-        )
+        try:
+            subprocess.run(
+                ["osascript", *[a for line in script for a in ("-e", line)], message, title],
+                stdin=subprocess.DEVNULL, capture_output=True, check=False,
+            )
+        except OSError:
+            pass  # a missing osascript (not a Mac) must not stop the review page from coming up
 
 
 def _descendants(pid: int) -> list[int]:

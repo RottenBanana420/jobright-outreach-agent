@@ -4,6 +4,8 @@ from __future__ import annotations
 import subprocess
 import time
 
+import pytest
+
 from outreach.run import SystemLauncher
 
 
@@ -35,3 +37,9 @@ def test_terminate_ignores_a_process_that_is_already_gone() -> None:
     gone.wait()
 
     SystemLauncher().terminate(gone.pid)  # no error
+
+
+def test_notify_without_osascript_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", "")  # no osascript, as on a Linux CI runner
+
+    SystemLauncher().notify("title", "message")
