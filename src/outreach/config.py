@@ -35,6 +35,7 @@ class Config:
     humanizer_check: str = ""  # optional path to the work-humanizer check script; empty means skip
     gmail_credentials: str = "credentials.json"  # the Google Cloud OAuth client (Desktop app); gitignored
     gmail_token: str = "data/gmail_token.json"  # written by `outreach gmail-auth`; gitignored
+    test_recipient: str = ""  # live-test mode: every email goes to a plus-address of this one address; empty = off
     resume_files: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_RESUME_FILES))
 
     def as_dict(self) -> dict[str, Any]:
@@ -42,6 +43,22 @@ class Config:
 
 
 _MINIMUMS = {"contacts_per_company": 1, "shortlist_size": 1, "cooldown_days": 0}
+
+
+def _is_plain_address(value: str) -> bool:
+    local, at, domain = value.partition("@")
+    return bool(local and at and "." in domain and not any(c in value for c in "+ ,;<>\t") and "@" not in domain)
+
+
+def test_address(base: str, contact_id: int) -> str:
+    """The address a live-test email goes to: a plus-address of `base`, different for every Contact."""
+    local, _, domain = base.partition("@")
+    return f"{local}+outreachtest{contact_id}@{domain}".lower()
+
+
+def is_test_address(address: str) -> bool:
+    """True for an address `test_address` made, so sending to it must not start a Contact's cooldown."""
+    return "+outreachtest" in address.lower().partition("@")[0]
 
 
 def _check(name: str, value: Any, file: str) -> Any:
@@ -74,6 +91,8 @@ def _check(name: str, value: Any, file: str) -> Any:
             raise bad("must be a string")
         if name in ("timezone", "model") and not value.strip():
             raise bad("must not be empty")
+        if name == "test_recipient" and value and not _is_plain_address(value):
+            raise bad("must be one plain address like you@gmail.com (no '+', spaces or commas)")
         if name == "timezone":
             try:
                 ZoneInfo(value)

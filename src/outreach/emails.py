@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from outreach.config import Config
+from outreach.config import Config, test_address
 from outreach.errors import Conflict, UserError
 from outreach.lint import Finding, hard_findings, lint_email, run_humanizer
 from outreach.resume import check_resume, resume_path, variant_for
@@ -63,6 +63,7 @@ def prepare_emails(
 
     # Validate everything before writing anything: one bad email stops the whole prepare.
     plan: list[tuple[sqlite3.Row, str, dict[str, Any]]] = []
+    revealed_for: dict[int, str] = {}  # the real revealed address, used only to lint in live-test mode
     for i, e in enumerate(emails):
         contact = store.run_contact(run_id, e["contact_id"])
         if contact is None:
@@ -71,15 +72,19 @@ def prepare_emails(
             raise UserError(f"emails[{i}].contact_id: Contact {e['contact_id']} ({contact['name']}) is "
                             f"{contact['status']}, not a picked Contact; flagged Contacts get no email")
         address = by_contact.get(e["contact_id"]) or contact["email"]
+        stand_in = test_address(config.test_recipient, contact["id"]) if config.test_recipient else None
         if not address:
             raise UserError(f"emails[{i}].contact_id: Contact {e['contact_id']} ({contact['name']}) has no "
                             "revealed address; add it to revealed_addresses.json")
         if hard := hard_findings(e["recipients"]):
             raise UserError(f"emails[{i}]: {hard[0].message}")
-        if e["recipients"][0] != address:
+        if e["recipients"][0] not in (address, stand_in):
             raise UserError(f"emails[{i}].to: {e['recipients'][0]!r} is not the revealed address {address!r} "
                             f"for {contact['name']}")
-        plan.append((contact, address, e))
+        # Live-test mode: the real address goes no further than the lint; the email, the Contact row and
+        # Gmail only ever see the plus-address of the user's own inbox.
+        revealed_for[contact["id"]] = address
+        plan.append((contact, stand_in or address, e))
 
     result = Prepared()
     claimed: dict[str, str] = {}
@@ -114,7 +119,8 @@ def prepare_emails(
         variant = variant_for(apps[0]["title"])
         path = resume_path(config, variant)
         block = check_resume(path)
-        findings, hook_skipped = _lint(config, subject=e["subject"], body=e["body"], address=address,
+        findings, hook_skipped = _lint(config, subject=e["subject"], body=e["body"],
+                                       address=revealed_for[contact["id"]],
                                        roles=[a["title"] for a in apps], company=contact["company"])
         result.humanizer_skipped = result.humanizer_skipped or hook_skipped
         store.upsert_email(
