@@ -6,7 +6,7 @@ Every claim below links to a Google-owned page. Where Google's docs are silent, 
 
 ## Answer
 
-**Yes.** For this app (External user type, one user, `gmail.modify`), publishing to "In production" without verification stops the 7-day expiry. `outreach gmail-auth` then needs rerunning only when the token is revoked or invalidated for one of the reasons under [What can still revoke the token](#what-can-still-revoke-the-token). The cost is an "unverified app" warning that you click through at each sign-in. The app also stays capped at 100 users, which doesn't matter for one person.
+**Yes.** For this app (External user type, one user, `gmail.modify`), publishing to "In production" without verification stops the 7-day expiry. This is an inference: Google states the 7-day rule only for Testing and gives no expiry for In production, but no page says in so many words that In-production tokens don't expire. `outreach gmail-auth` then needs rerunning only when the token is revoked or invalidated for one of the reasons under [What can still revoke the token](#what-can-still-revoke-the-token). The cost is an "unverified app" warning that you click through at each sign-in. The app also stays capped at 100 users, which doesn't matter for one person.
 
 Why:
 
@@ -40,7 +40,7 @@ Publishing removes the 7-day rule only. Google lists these other ways a refresh 
 - You revoke the app's access.
 - The token goes unused for six months. A daily Run uses it, so this only matters after a long break.
 - **You change your Google password. Because the token includes Gmail scopes, this revokes it.** Rerun `outreach gmail-auth` after any password change.
-- The account exceeds its maximum number of live refresh tokens. The limit is "100 refresh tokens per Google Account per OAuth 2.0 client ID", and once it's reached, the oldest token stops working without warning. Each `outreach gmail-auth` run creates a new token, so this would take over 100 re-sign-ins on this one client. There's also an undisclosed limit across all clients ([same page](https://developers.google.com/identity/protocols/oauth2#expiration), [Native apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
+- The account exceeds its maximum number of live refresh tokens. The limit is "100 refresh tokens per Google Account per OAuth 2.0 client ID", and once it's reached, the oldest token stops working without warning. Each `outreach gmail-auth` run stores a new refresh token (`authorize` in `src/outreach/gmail_api.py`), so this would take over 100 re-sign-ins on this one client. There's also an undisclosed limit across all clients ([same page](https://developers.google.com/identity/protocols/oauth2#expiration), [Native apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
 - The access was time-based and has run out.
 - A Workspace admin restricts the scope's service. This doesn't apply to a personal Gmail account.
 
@@ -51,11 +51,11 @@ Publishing removes the 7-day rule only. Google lists these other ways a refresh 
 The console moved the consent-screen settings under **Google Auth platform**, split into Branding, Audience and Data Access ([Configure the OAuth consent screen](https://developers.google.com/workspace/guides/configure-oauth-consent)). The publish steps follow [Google Ads API: Brand verification](https://developers.google.com/google-ads/api/docs/api-policy/brand-verification), which gives the same clicks for any Cloud project:
 
 1. Open the [Google Cloud console](https://console.cloud.google.com/) and select the project that holds the Outreach OAuth client.
-2. Go to **Menu > Google Auth platform > Audience**. The older path, **APIs & Services > OAuth consent screen**, then the **Audience** tab, gets to the same page.
-3. Check that **User type** is **External**. A personal Gmail account has no Internal option.
+2. Go to **Menu > Google Auth platform > Audience**. The Google Ads guide gets there from the **OAuth consent screen** page, then the **Audience** tab ([Brand verification](https://developers.google.com/google-ads/api/docs/api-policy/brand-verification)).
+3. Check that **User type** is **External**. Internal is only for users in a Google Workspace or Cloud Identity organization ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), so a personal Gmail account uses External.
 4. Under **Publishing status** (currently **Testing**), click **Publish app**.
 5. When the console asks **Push to Production?**, click **Confirm**.
-6. Run `outreach gmail-auth` once. On the "Google hasn't verified this app" screen, choose to continue, then grant the Gmail permission.
+6. Run `outreach gmail-auth` once. Click through the "unverified app" warning ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), then grant the Gmail permission.
 
 Why step 6 is needed: the current token was issued while the app was in Testing, and Google states it expires seven days from consent ([Manage App Audience](https://support.google.com/cloud/answer/15549945)). No Google page says publishing extends a token that was already issued, so sign in once more to get a token issued under In production.
 
@@ -70,7 +70,7 @@ Google's docs don't describe the steps to switch back. The Audience page shows a
 
 What happens to existing tokens either way:
 
-- **Testing → In production:** Google doesn't document it. Treat the old token as still expiring 7 days after its consent, and sign in again (step 6 above).
+- **Testing → In production:** Google doesn't document it; see step 6 above.
 - **In production → Testing:** Google says only that after this change "your app will continue to function according to its current configuration (e.g., adhering to 'Testing' user caps…)". It says nothing specific about refresh tokens issued while In production ([Brand Approvals & Auto-Cancellations](https://support.google.com/cloud/answer/16868008)). Don't count on an In-production token lasting. Sign in again (step 4) so the token matches the status.
 - Switching back also cancels any pending verification, because "Apps in 'Testing' are ineligible for verification" ([same page](https://support.google.com/cloud/answer/16868008)). We have none pending.
 
