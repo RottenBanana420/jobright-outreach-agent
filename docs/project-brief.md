@@ -1,6 +1,6 @@
 # Project Brief: Jobright AI Outreach Agent
 
-Original idea, captured 2026-11-12. Input for `/grill-with-docs`; not yet a spec.
+Original idea, captured 2026-11-12. Input for `/grill-with-docs`; not a spec. Where it differs from what was built (for example the planned `python main.py` commands, the ranking approval pause), [design.md](design.md) and the README are current.
 
 ## Goal
 
