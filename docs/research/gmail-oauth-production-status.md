@@ -14,6 +14,12 @@ Why:
 2. The only exception in Testing is an app that asks for nothing beyond name, email and profile ([Manage App Audience](https://support.google.com/cloud/answer/15549945)). `gmail.modify` is not on that list, so staying in Testing always means a weekly re-sign-in.
 3. A personal-use app doesn't need verification: "If the app is for your personal use (fewer than 100 users)… you and your limited number of users can continue using the app without going through verification", and "users will be allowed to click through 'unverified app' warning screens during sign-in" ([When is verification not needed](https://support.google.com/cloud/answer/13464323)).
 
+## Found when publishing (2026-11-14)
+
+The console kept **Publish app** disabled ("To publish your app, you must complete your configuration on the Branding page") until Branding had an **Application home page**, an **Application privacy policy link**, and their domain under **Authorized domains**. Google's [Manage OAuth App Branding](https://support.google.com/cloud/answer/15549049) page says these links are "required for all external production apps", with no personal-use exception. A Terms of Service link wasn't needed, and no Search Console check was asked for.
+
+For this project, the two pages live on the `gh-pages` branch at https://rottenbanana420.github.io/jobright-outreach-agent/ (authorized domain `rottenbanana420.github.io`). The app was published the same day, and `outreach gmail-auth` was rerun.
+
 ## How `gmail.modify` is classified
 
 | Scope | Classification |
@@ -52,12 +58,13 @@ The console moved the consent-screen settings under **Google Auth platform**, sp
 
 1. Open the [Google Cloud console](https://console.cloud.google.com/) and select the project that holds the Outreach OAuth client.
 2. Go to **Menu > Google Auth platform > Audience**. The Google Ads guide gets there from the **OAuth consent screen** page, then the **Audience** tab ([Brand verification](https://developers.google.com/google-ads/api/docs/api-policy/brand-verification)).
-3. Check that **User type** is **External**. Internal is only for users in a Google Workspace or Cloud Identity organization ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), so a personal Gmail account uses External.
-4. Under **Publishing status** (currently **Testing**), click **Publish app**.
-5. When the console asks **Push to Production?**, click **Confirm**.
-6. Run `outreach gmail-auth` once. Click through the "unverified app" warning ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), then grant the Gmail permission.
+3. On **Branding**, fill in **Application home page** and **Application privacy policy link**, add their domain under **Authorized domains**, then **Save** (see the section above).
+4. Check that **User type** is **External**. Internal is only for users in a Google Workspace or Cloud Identity organization ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), so a personal Gmail account uses External.
+5. Under **Publishing status** (currently **Testing**), click **Publish app**.
+6. When the console asks **Push to Production?**, click **Confirm**.
+7. Run `outreach gmail-auth` once. Click through the "unverified app" warning ([When is verification not needed](https://support.google.com/cloud/answer/13464323)), then grant the Gmail permission.
 
-Why step 6 is needed: the current token was issued while the app was in Testing, and Google states it expires seven days from consent ([Manage App Audience](https://support.google.com/cloud/answer/15549945)). No Google page says publishing extends a token that was already issued, so sign in once more to get a token issued under In production.
+Why step 7 is needed: the current token was issued while the app was in Testing, and Google states it expires seven days from consent ([Manage App Audience](https://support.google.com/cloud/answer/15549945)). No Google page says publishing extends a token that was already issued, so sign in once more to get a token issued under In production.
 
 ## Switching back to Testing
 
@@ -70,7 +77,7 @@ Google's docs don't describe the steps to switch back. The Audience page shows a
 
 What happens to existing tokens either way:
 
-- **Testing → In production:** Google doesn't document it; see step 6 above.
+- **Testing → In production:** Google doesn't document it; see step 7 above.
 - **In production → Testing:** Google says only that after this change "your app will continue to function according to its current configuration (e.g., adhering to 'Testing' user caps…)". It says nothing specific about refresh tokens issued while In production ([Brand Approvals & Auto-Cancellations](https://support.google.com/cloud/answer/16868008)). Don't count on an In-production token lasting. Sign in again (step 4) so the token matches the status.
 - Switching back also cancels any pending verification, because "Apps in 'Testing' are ineligible for verification" ([same page](https://support.google.com/cloud/answer/16868008)). We have none pending.
 
