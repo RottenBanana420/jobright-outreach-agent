@@ -9,6 +9,7 @@ User-facing text says "undelivered", never "bounced"; the code keeps `bounce`.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
@@ -71,6 +72,14 @@ def missing_setup(config: Config, config_file: Path) -> list[str]:
     return missing
 
 
+def _no_applications(run_dir: Path) -> bool:
+    """Today's Run read the Applied list and saved it empty: there is nothing to follow up."""
+    try:
+        return bool(json.loads((run_dir / "applications.json").read_text())["applications"] == [])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _signed_in(config: Config) -> bool:
     return Path(config.gmail_token).exists()
 
@@ -126,6 +135,7 @@ def build_menu(
                 waiting = 0 if closed else sum(1 for e in emails if e["status"] in ("written", "approved"))
                 sent = sum(1 for e in emails if e["status"] == "sent")
                 has_emails = bool(emails)
+    nothing_today = run_found and not has_emails and (reviewed or _no_applications(run_dir))
 
     if live:
         status = "a Run is in progress in another window"
@@ -135,8 +145,8 @@ def build_menu(
         status = f"send interrupted: {_emails(interrupted)} to finish"
     elif waiting:
         status = f"waiting for your review: {_emails(waiting)}" + (" (practice run)" if dry_run else "")
-    elif not has_emails and reviewed:
-        status = "done, no applications to follow up"  # `shortlist` found nothing, so the Run ended
+    elif nothing_today:
+        status = "done, no applications to follow up"
     elif not has_emails:
         status = "started, not finished; Start picks up where it left off"
     elif sent:
@@ -183,7 +193,7 @@ def build_menu(
         default = SEND
     elif waiting:
         default = REVIEW
-    elif not run_found or (not has_emails and not reviewed):
+    elif not run_found or (not has_emails and not nothing_today):
         default = START
     else:
         default = QUIT  # today's Run is done

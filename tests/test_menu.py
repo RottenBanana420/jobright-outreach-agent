@@ -259,6 +259,19 @@ def test_a_run_that_found_no_applications_today_is_done(env: Env) -> None:
     assert m.default == QUIT
 
 
+def test_a_run_that_saved_an_empty_application_list_is_done(env: Env) -> None:
+    finish_setup(env)
+    env.write_apps([])  # a Run from before `shortlist` ended it: the list was saved, then Claude Code exited
+    with closing(Store(env.db)) as store, store.transaction():
+        run_id = store.get_or_create_run(env.run_dir, TODAY)
+        store.set_status("runs", run_id, "ended", "Claude Code exited with 0")
+
+    m = menu(env)
+
+    assert m.title.endswith("today: done, no applications to follow up")
+    assert m.default == QUIT
+
+
 def test_a_practice_run_whose_review_page_closed_is_done_not_waiting(env: Env) -> None:
     prepared(env, contacts=1, dry_run=True)
     finish_setup(env)
