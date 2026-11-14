@@ -11,6 +11,9 @@ Typed by hand in a terminal, from the project folder. There is no schedule and n
 3. starts `caffeinate -dis -w <pid of outreach start>`, so the Mac stays awake and the hold also ends if `outreach start` dies;
 4. runs `claude --chrome --model <config model> "/outreach-run <run-dir>"` in the foreground, in this terminal, and waits;
 5. when Claude Code exits, ends `caffeinate` and marks the Run `ended` (exit code 0) or `failed` (any other code; `outreach start` exits 1 and says to run it again).
+6. while Claude Code runs, checks every 2 seconds whether the Run is `reviewed` (below). Once it is, Claude Code gets 30 seconds to print its final report, then `start` ends it and its child processes and marks the Run `ended`, whatever the exit code.
+
+`prepare` and `review` mark the Run `reviewed` when the review page has closed (confirmed or stopped with Ctrl-C) and the confirmed emails have been sent. They do that only for a live Run (one with an `outreach start` process), so a review typed by hand never marks anything. A resumed Run starts again as `running`, so an earlier session's review does not end it.
 
 `--contacts N` (at least 1) is the cap for this Run, as for `pick-contacts`. `--dry-run` is stored on the Run and passed to `prepare`. One Run at a time: a second `start` while another is in progress is refused.
 
@@ -39,10 +42,10 @@ A `stop` that arrives before Claude Code has been recorded (right after `start`)
 
 Serves the review page for a Run whose emails are already prepared (exit 2 if there are none). Nothing is written to the emails.
 
-## Mac notification
+## Opening the review page
 
-`prepare` and `review` post a Mac notification ("Outreach review ready", with the number of emails waiting and the page URL) through `osascript` once the page is up. Not posted with `--no-serve`.
+Once the page is up, `prepare` and `review` open its URL in the default browser (`open <url>`) and post a Mac notification ("Outreach review ready", with the number of emails waiting and the page URL) through `osascript`. Both are best effort: macOS can hide the notification (for example when notifications for Script Editor are off), and the URL is also printed. Neither happens with `--no-serve`.
 
 ## SQLite
 
-`runs.status`: `created`, `running`, then the stage markers (`shortlisted` ...), and at the end `ended`, `failed` or `stopped` (each change with an `events` row). `runs.owner_pid`, `caffeinate_pid` and `claude_pid` are set only while a Run is live.
+`runs.status`: `created`, `running`, then the stage markers (`shortlisted` ...), `reviewed` once the review page has closed during a live Run, and at the end `ended`, `failed` or `stopped` (each change with an `events` row). `runs.owner_pid`, `caffeinate_pid` and `claude_pid` are set only while a Run is live.

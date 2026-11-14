@@ -10,6 +10,8 @@ class FakeLauncher:
         self.prompts: list[str] = []
         self.models: list[str] = []
         self.notifications: list[tuple[str, str]] = []
+        self.opened: list[str] = []
+        self.ended_after_review: list[bool] = []  # per Claude session: did `start` end it because the review was done
         self.terminated: list[int] = []
         self.awake: set[int] = set()  # caffeinate "processes" currently running
         self.awake_while_claude_ran: list[bool] = []
@@ -32,7 +34,9 @@ class FakeLauncher:
             self.caffeinate_hook()
         return pid
 
-    def run_claude(self, prompt: str, model: str, on_started: Callable[[int], None]) -> int:
+    def run_claude(
+        self, prompt: str, model: str, on_started: Callable[[int], None], finished: Callable[[], bool],
+    ) -> int:
         pid = self._pid()
         self._live.add(pid)
         if self.spawn_hook:
@@ -44,7 +48,10 @@ class FakeLauncher:
         if self.claude_hook:
             self.claude_hook()
         self._live.discard(pid)
-        return -15 if pid in self.terminated else self.claude_exit
+        # The real launcher polls `finished` while Claude runs and ends Claude after a grace period once it is true.
+        done = pid not in self.terminated and finished()
+        self.ended_after_review.append(done)
+        return -15 if pid in self.terminated or done else self.claude_exit
 
     def terminate(self, pid: int) -> None:
         self.terminated.append(pid)
@@ -56,3 +63,6 @@ class FakeLauncher:
 
     def notify(self, title: str, message: str) -> None:
         self.notifications.append((title, message))
+
+    def open_url(self, url: str) -> None:
+        self.opened.append(url)

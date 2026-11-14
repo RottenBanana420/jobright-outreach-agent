@@ -120,11 +120,11 @@ After each email, rewrite `RUN_DIR/written_emails.json` as `{"emails": [{"contac
 
 ### 7. Prepare and open the review page
 
-Run `uv run outreach prepare RUN_DIR [--dry-run] [--config X] [--db X] [--now X]` (add `--dry-run` exactly when `dry_run` is true; if `steps_done` contains `prepared`, follow "Resume after `prepared`" below instead and never `prepare`). It serves the review page and does not return until the user confirms or stops it, so start it as a **background** Bash command. It posts the Mac notification when the page is ready.
+Run `uv run outreach prepare RUN_DIR [--dry-run] [--config X] [--db X] [--now X]` (add `--dry-run` exactly when `dry_run` is true; if `steps_done` contains `prepared`, follow "Resume after `prepared`" below instead and never `prepare`). It serves the review page and does not return until the user confirms or stops it, so start it as a **background** Bash command. It opens the page in the default browser and posts the Mac notification when the page is ready.
 
 - Read its first output lines: if `prepare` exits with an error (exit code 2: for example a file rejected with the field named, or more than one recipient), show the message, fix the file if the mistake is yours, and run it again. If a Resume Variant file is bad, `prepare` still succeeds and the page shows those emails as blocked; tell the user which file.
 - Tell the user the review page URL, how many emails are waiting, and (for a dry run) that no Gmail drafts were made and nothing can be sent. Then wait. Do **not** approve, reject, skip, confirm or send anything yourself: only the user does, on the page.
-- When the background command ends, the user has confirmed or stopped it. Give the final report.
+- When the background command ends, the user has confirmed or stopped it. Give the final report right away and keep it short: `outreach start` ends this session about 30 seconds after the review is done.
 
 **Resume after `prepared`.** The emails are in SQLite and the user may already have confirmed them before the Run stopped, so the right command depends on how far it got:
 
