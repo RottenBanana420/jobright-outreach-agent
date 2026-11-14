@@ -288,9 +288,23 @@ until uv run outreach gmail-auth; do
   confirm "Try the sign-in again?" || { SKIPPED+=("Gmail sign-in: run 'uv run outreach gmail-auth'"); break; }
 done
 
+# Tell the menu to stop counting the 7 days. Top-level key, so it goes above any [table].
+python3 - <<'PY' && printf '  %s✓ wrote%s gmail_publishing_status = "production" → outreach.toml\n' "$GREEN" "$RESET"
+import re
+from pathlib import Path
+p = Path("outreach.toml")
+s = p.read_text() if p.exists() else ""
+line = 'gmail_publishing_status = "production"\n'
+if re.search(r"(?m)^gmail_publishing_status\s*=", s):
+    s = re.sub(r"(?m)^gmail_publishing_status\s*=.*\n?", line, s)
+else:
+    s = line + s
+p.write_text(s)
+PY
+pause "Press Enter to finish."
+
 finish
-say "Gmail no longer signs you out every 7 days."
-note "The menu still counts 'day N of 7' from this sign-in. Ignore it until the countdown is updated."
+say "Gmail no longer signs you out every 7 days, and the menu no longer counts them."
 printf '\n'
 }
 

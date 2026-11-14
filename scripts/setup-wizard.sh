@@ -263,6 +263,7 @@ step "Left menu → Audience: under 'Test users' click Add users and add YOUR Gm
 step "Left menu → Data Access → Add or remove scopes: search 'Gmail API', tick  .../auth/gmail.modify  → Update → Save."
 note "Google's console layout changes now and then. If a label differs, look for the same idea. Leave the app in 'Testing': no review needed."
 note "While it is in Testing, the Gmail sign-in expires every 7 days. Re-run stage 7 (or 'uv run outreach gmail-auth') when that happens."
+note "To end that later, run scripts/gmail-production-wizard.sh."
 pause "Test user added and the gmail.modify scope saved? Press Enter."
 
 # ── 5 ─────────────────────────────────────────────────────────────────────

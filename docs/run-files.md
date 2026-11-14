@@ -54,7 +54,7 @@ Once the page is up, `prepare` and `review` open its URL in the default browser 
 
 `./outreach` (a small script in the project folder that runs `uv run outreach "$@"`) or `uv run outreach`, in an interactive terminal, opens a Questionary select prompt. `outreach/menu.py` builds it from the Store, the config and the files (`build_menu`); the prompt itself is a thin layer on top. Nothing outside the project folder is changed: no aliases, no shell rc edits.
 
-The title line is the date and today's status (today's Run is `data/<date>`): `no Run yet`, `a Run is in progress in another window`, `send interrupted: N emails to finish`, `waiting for your review: N emails`, `started, not finished; Start picks up where it left off`, `all sent: N emails` or `done, nothing sent` (a practice run counts as done once its review page has closed during the Run, since its confirmed emails stay `approved`). Below it: the Gmail sign-in (`day N of 7`, or just `signed in` for a token saved before the date was kept) and the addresses recorded as bounced today, worded "N emails undelivered; those addresses won't be used again". User-facing text says "undelivered"; the code and these docs keep `bounce`. There is no item for recording bounces: Claude records them at the start of every Run.
+The title line is the date and today's status (today's Run is `data/<date>`): `no Run yet`, `a Run is in progress in another window`, `send interrupted: N emails to finish`, `waiting for your review: N emails`, `started, not finished; Start picks up where it left off`, `all sent: N emails` or `done, nothing sent` (a practice run counts as done once its review page has closed during the Run, since its confirmed emails stay `approved`). Below it: the Gmail sign-in (`day N of 7`, or just `signed in` for a token saved before the date was kept or when `gmail_publishing_status = "production"`) and the addresses recorded as bounced today, worded "N emails undelivered; those addresses won't be used again". User-facing text says "undelivered"; the code and these docs keep `bounce`. There is no item for recording bounces: Claude records them at the start of every Run.
 
 One flat list, no sub-menus, no follow-up questions and no "are you sure" (the review page's totals confirmation is the gate). Daily items above the line, upkeep below. Items marked * show only when they apply.
 
@@ -66,7 +66,7 @@ One flat list, no sub-menus, no follow-up questions and no "are you sure" (the r
 | Finish an interrupted send* | `outreach send data/<date>` | confirmed emails are not all sent and labelled | a send was interrupted |
 | Stop the Run* | `outreach stop` | a Run is live in another window | never (one Enter must not stop it; the pointer rests on Quit) |
 | Finish setup* | `scripts/setup-wizard.sh` (through the `Launcher`, so tests never run it) | `outreach.toml`, `credentials.json`, the Gmail token or a resume file is missing | setup is incomplete (this wins over everything) |
-| Renew Gmail sign-in | `outreach gmail-auth` | always | from day 6 of the 7-day sign-in (before a send or review) |
+| Renew Gmail sign-in | `outreach gmail-auth` | always | from day 6 of the 7-day sign-in (before a send or review); never in production |
 | Show settings | `outreach config` | always | |
 | Quit | | always (`q` also quits, as does Ctrl-C) | today's Run is done |
 
