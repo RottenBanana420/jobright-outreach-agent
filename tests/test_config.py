@@ -53,6 +53,9 @@ def test_settings_in_the_file_override_defaults(env: Env) -> None:
         ('timezone = "Mars/Olympus"\n', "timezone"),
         ("send_pause_seconds = -3\n", "send_pause_seconds"),
         ("shortlist_sise = 5\n", "shortlist_sise"),  # typo'd key
+        ('test_recipient = "me"\n', "test_recipient"),
+        ('test_recipient = "me+x@gmail.test"\n', "test_recipient"),  # the plus part is added by the program
+        ('test_recipient = "me@gmail.test, you@gmail.test"\n', "test_recipient"),
         ("contacts_per_company = [\n", "outreach.toml"),  # malformed TOML
     ],
 )
@@ -93,3 +96,4 @@ def test_an_unknown_resume_variant_in_the_config_is_named(env: Env) -> None:
     code, _, err = show(env)
     assert code == 2
     assert "resume_files.rust" in err
+

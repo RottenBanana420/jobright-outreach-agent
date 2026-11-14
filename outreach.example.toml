@@ -9,7 +9,8 @@ send_pause_seconds = 30
 model = "sonnet"
 gmail_credentials = "credentials.json"  # Google Cloud OAuth client of type Desktop app (gitignored)
 gmail_token = "data/gmail_token.json"   # written by `outreach gmail-auth` (gitignored)
-humanizer_check = ""            # optional: path to the work-humanizer check script (see docs/review-handoff-files.md)
+test_recipient = ""             # live test only: your own address; every email goes to you+outreachtest<id>@... instead of the Contact
+humanizer_check = ".claude/skills/outreach-humanizer/check.py"  # the project's own copy of the humanizer lint; "" skips it (see docs/review-handoff-files.md)
 
 # Resume Variant -> file name inside resume_dir. These are the defaults; override any of them.
 [resume_files]

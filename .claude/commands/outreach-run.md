@@ -1,7 +1,7 @@
 ---
 description: Do the browser half of an outreach Run (started by `outreach start`): read today's Applications, find and reveal Contacts, write the Outreach Emails, open the review page
 argument-hint: <run-dir>
-allowed-tools: Bash(uv run outreach:*), Bash(python3 ~/.claude/skills/work-humanizer/check.py:*), Read(~/.claude/skills/work-humanizer/**), Skill(work-humanizer), mcp__claude_ai_Gmail__search_threads, mcp__claude_ai_Gmail__get_thread, mcp__claude_ai_Gmail__get_message
+allowed-tools: Bash(uv run outreach:*), Bash(python3 .claude/skills/outreach-humanizer/check.py:*), Read(.claude/skills/outreach-humanizer/**), Skill(outreach-humanizer), mcp__claude_ai_Gmail__search_threads, mcp__claude_ai_Gmail__get_thread, mcp__claude_ai_Gmail__get_message
 ---
 
 You are doing the browser half of one outreach **Run** for the user, who is watching this window. Python (`uv run outreach ...`, run from the project folder) owns ranking, Contact picking, resumes, linting, SQLite, Gmail and the review page; you read Jobright through Claude in Chrome, write JSON handoff files and call the CLI at fixed points (ADR 0001). Terms follow `GLOSSARY.md`: an Outreach Email is one email to one Contact about one Company Group; "Draft" means a Gmail draft or the Jobright Draft.
@@ -112,8 +112,8 @@ For each picked Contact with a revealed address and no entry yet in `written_ema
 
 **Humanize every email.** For each body:
 
-1. Invoke the `work-humanizer` skill in **Rewrite mode** on the written body (treat the draft as the text given to you; keep every fact, the exact role titles, and "applied"; the skill's Interview mode is not used).
-2. Run its check as a lint: take the script path from `uv run outreach config` (`humanizer_check`); if that is empty use `~/.claude/skills/work-humanizer/check.py`, written exactly like that with the `~`. Run `python3 <script> -` with the body on stdin (a quoted here-document, so the body cannot become part of the command), and edit the body to clear what it flags where that can be done without changing what it says.
+1. Invoke the project's `outreach-humanizer` skill (`.claude/skills/outreach-humanizer/`) in **Rewrite mode** on the written body (treat the draft as the text given to you; keep every fact, the exact role titles, and "applied"; the skill's Interview mode is not used).
+2. Run its check as a lint: take the script path from `uv run outreach config` (`humanizer_check`); if that is empty use `.claude/skills/outreach-humanizer/check.py`, written exactly like that (a path inside the project, relative to the project folder). Run `python3 <script> -` with the body on stdin (a quoted here-document, so the body cannot become part of the command), and edit the body to clear what it flags where that can be done without changing what it says.
 3. Re-count the words after the rewrite: the body must still be 80 to 140 words, still contain every exact role title in the group, and still say the user applied. `prepare` lints these three too, and shows any failure on the review page for the user to fix.
 
 After each email, rewrite `RUN_DIR/written_emails.json` as `{"emails": [{"contact_id": <id>, "to": ["<address>"], "subject": "...", "body": "..."}]}` with all emails so far, in the shape in `docs/review-handoff-files.md`. Contacts under `review` get no email.

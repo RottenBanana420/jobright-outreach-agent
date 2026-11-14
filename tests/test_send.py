@@ -364,3 +364,56 @@ def test_confirming_in_prepare_sends_straight_away(env: Env) -> None:
     assert outcome == [0]
     assert statuses(env) == ["sent"]
     assert sent_to(env) == ["eng.0@acme.test"]
+
+
+TEST_MODE = 'test_recipient = "me@gmail.test"\n'
+
+
+def test_live_test_mode_sends_only_to_plus_addresses_of_the_users_inbox(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=2, extra_config=TEST_MODE)
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    with serving(env) as page:
+        for email_id in (1, 2):
+            page.post(f"/emails/{email_id}/approve")
+        assert page.post("/confirm-send", {"emails": "2", "recipients": "2"}).status == 200
+
+    assert env.send().code == 0
+
+    assert sent_to(env) == [f"me+outreachtest{i}@gmail.test" for i in sorted(ids.values())]
+    assert not any("acme.test" in str(m["To"]) for m in env.gmail.sent_messages())
+    assert {r["email"] for r in env.query("SELECT email FROM contacts")} == {
+        f"me+outreachtest{i}@gmail.test" for i in ids.values()}
+    assert {r["address"] for r in email_rows(env)} == {f"me+outreachtest{i}@gmail.test" for i in ids.values()}
+
+
+def test_live_test_mode_does_not_start_the_contact_cooldown(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1, extra_config=TEST_MODE)
+    write_for_all(env, ids)
+    assert env.prepare().code == 0
+    with serving(env) as page:
+        page.post("/emails/1/approve")
+        page.post("/confirm-send", {"emails": "1", "recipients": "1"})
+
+    assert env.send().code == 0
+
+    assert env.query("SELECT status FROM outreach_emails")[0]["status"] == "sent"
+    assert env.query("SELECT emailed_at FROM contacts")[0]["emailed_at"] is None
+
+
+def test_live_test_mode_announces_itself_when_preparing(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1, extra_config=TEST_MODE)
+    write_for_all(env, ids)
+
+    result = env.prepare()
+
+    assert result.code == 0
+    assert "LIVE TEST MODE" in result.out and "me@gmail.test" in result.out
+
+
+def test_live_test_mode_still_rejects_an_email_to_some_other_address(env: Env) -> None:
+    ids = prepared_inputs(env, contacts=1, extra_config=TEST_MODE)
+    env.write_revealed([{"contact_id": ids["Eng 0"], "address": "eng.0@acme.test"}])
+    env.write_emails([make_email(ids["Eng 0"], "someone.else@acme.test")])
+
+    assert env.prepare().code == 2

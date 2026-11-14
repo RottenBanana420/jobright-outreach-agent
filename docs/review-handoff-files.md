@@ -44,7 +44,7 @@ Running `prepare` again leaves emails that are already `ready_to_send` or later 
 
 `resume_dir` and `[resume_files]` (Resume Variant to file name; keys `forward_deployed`, `ml`, `ai`, `data`, `software`; defaults in `outreach.example.toml`).
 
-`humanizer_check`: optional path to the work-humanizer check script (`~/.claude/skills/work-humanizer/check.py`, not in this repo). When set and present, `prepare` and every page edit run `python <script>` with the email body on stdin. The real script always exits 0 and prints a `label: hits` line for each thing it flags (for example `semicolons: 2`, `AI words: ['delve']`), followed by stats lines even for clean text: `sentences: N, mean ...` and `words: N`. So only finding-shaped lines become `humanizer` findings: every line except `words: N`, and except `sentences: ...` unless it carries a `(uniform: ...)` note. A non-zero exit means the script crashed, so the check is skipped whatever it printed. Unset, missing, unable to start, or exiting non-zero means skipped, and `prepare` says so. Tests use a fake script that models this output, never the real one.
+`humanizer_check`: optional path to the humanizer check script. The project keeps its own copy at `.claude/skills/outreach-humanizer/check.py` (from phuryn/work-humanizer, MIT; see `NOTICE.md` there), relative to the project folder. When set and present, `prepare` and every page edit run `python <script>` with the email body on stdin. The real script always exits 0 and prints a `label: hits` line for each thing it flags (for example `semicolons: 2`, `AI words: ['delve']`), followed by stats lines even for clean text: `sentences: N, mean ...` and `words: N`. So only finding-shaped lines become `humanizer` findings: every line except `words: N`, and except `sentences: ...` unless it carries a `(uniform: ...)` note. A non-zero exit means the script crashed, so the check is skipped whatever it printed. Unset, missing, unable to start, or exiting non-zero means skipped, and `prepare` says so. Tests use a fake script that models this output, never the real one.
 
 ## SQLite
 
@@ -74,6 +74,10 @@ The Gmail adapter (`outreach.gmail.Gmail`) is the only external seam: `create_dr
 Scope: `https://www.googleapis.com/auth/gmail.modify`. It is the narrowest single scope that covers drafts, send, listing Sent and labelling: `gmail.compose` cannot list or label messages, and `gmail.labels` cannot label a message.
 
 An expired or revoked token, or a missing one, stops with a message that says to run `outreach gmail-auth`.
+
+### Live-test mode (`test_recipient`)
+
+With `test_recipient = "you@gmail.com"` in the config, `prepare` keeps the Claude files as they are (`to` still holds the revealed address and is still checked against it) but stores, drafts and sends every email to `you+outreachtest<contact_id>@gmail.com`, one distinct address per Contact. The real address is used only for the lint. `prepare` prints `LIVE TEST MODE`. Sending to such an address does not start the Contact's cooldown. Two Contacts who share one real address are not caught as `duplicate_address` in this mode. Use a separate `--data-dir` and `--db` for the test (a Run is one per day, and a prepared Run is never prepared again), and empty the setting for real outreach.
 
 ### Drafts
 

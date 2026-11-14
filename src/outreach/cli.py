@@ -235,6 +235,9 @@ def _prepare(args: argparse.Namespace, launcher: Launcher, gmail: Gmail | None) 
         run_id = int(run["id"])
     mode = " (dry run: no Gmail drafts, nothing can be sent)" if args.dry_run else ""
     print(f"prepared {done.emails} Outreach Email(s) for {done.groups} Company Group(s){mode}")
+    if config.test_recipient:
+        print(f"LIVE TEST MODE: every email goes to a plus-address of {config.test_recipient}, "
+              "not to the Contact's real address")
     if done.blocked:
         print(f"{done.blocked} email(s) blocked by a bad resume; see the review page")
     for line in done.skipped:

@@ -524,7 +524,7 @@ def test_prepare_skips_the_humanizer_check_when_the_script_is_missing(env: Env) 
     assert "humanizer check skipped" in result.out
 
 
-# Models the real check (~/.claude/skills/work-humanizer/check.py): body on stdin, exit code 0 always, and
+# Models the real check (.claude/skills/outreach-humanizer/check.py): body on stdin, exit code 0 always, and
 # stdout holds "label: hits" lines for what it flagged plus stats lines ("sentences: ...", "words: N") even
 # for clean text.
 FAKE_CHECK = (

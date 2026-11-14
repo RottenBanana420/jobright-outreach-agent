@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import NoReturn
 
-from outreach.config import Config
+from outreach.config import Config, is_test_address
 from outreach.drafts import refresh_draft
 from outreach.errors import UserError
 from outreach.gmail import (
@@ -112,7 +112,8 @@ def _mark_sent(store: Store, gmail: Gmail, row: sqlite3.Row, gmail_id: str, repo
     with store.transaction():
         store.record_sent(row["id"], gmail_id, _now())
         store.set_status("outreach_emails", row["id"], "sent", f"Gmail accepted message {gmail_id}")
-        store.mark_emailed(row["contact_id"], _now())
+        if not is_test_address(row["address"]):  # a live test must not start a cooldown
+            store.mark_emailed(row["contact_id"], _now())
     report.sent.append(_label(row))
     _apply_label(store, gmail, row, report, gmail_id)
 
