@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from threading import Thread
@@ -52,11 +52,12 @@ class Page:
     def get(self, path: str = "/", headers: dict[str, str] | None = None) -> Reply:
         return self._send(urllib.request.Request(self.base + path, headers=headers or {}))
 
-    def post(self, path: str, data: dict[str, str] | None = None, token: str | None = None,
+    def post(self, path: str, data: Mapping[str, str | list[str]] | None = None, token: str | None = None,
              headers: dict[str, str] | None = None) -> Reply:
         form = {"token": self.token if token is None else token, **(data or {})}
         request = urllib.request.Request(
-            self.base + path, data=urllib.parse.urlencode(form).encode(), headers=headers or {}, method="POST",
+            self.base + path, data=urllib.parse.urlencode(form, doseq=True).encode(), headers=headers or {},
+            method="POST",
         )
         return self._send(request)
 
@@ -208,6 +209,27 @@ def test_a_post_without_the_page_token_is_refused(env: Env) -> None:
     assert statuses(env) == ["written", "written"]
 
 
+def test_the_pages_own_form_posts_carry_its_origin_and_are_accepted(env: Env) -> None:
+    # Under `Referrer-Policy: no-referrer` Chrome sends `Origin: null` on the page's own form posts, and every
+    # approve was refused as cross-origin. The page must use a policy that keeps the real Origin.
+    prepared(env)
+    with serving(env) as page:
+        policy = page.get().headers["Referrer-Policy"]
+        reply = page.post("/emails/1/approve", headers={"Origin": page.base})
+        other = page.post("/emails/2/approve", headers={"Origin": page.base.replace("127.0.0.1", "localhost")})
+    assert policy == "same-origin"
+    assert reply.status == 200 and other.status == 200
+    assert statuses(env) == ["approved", "approved"]
+
+
+def test_a_post_with_a_null_origin_is_refused(env: Env) -> None:
+    prepared(env)
+    with serving(env) as page:
+        reply = page.post("/emails/1/approve", headers={"Origin": "null"})
+    assert reply.status == 403
+    assert statuses(env) == ["written", "written"]
+
+
 def test_a_cross_origin_post_is_refused(env: Env) -> None:
     prepared(env)
     with serving(env) as page:
@@ -317,6 +339,57 @@ def test_an_unknown_resume_variant_is_rejected(env: Env) -> None:
         reply = page.post("/groups/1/resume", {"variant": "../../etc/passwd"})
     assert reply.status == 400
     assert email_rows(env)[0]["resume_variant"] == "software"
+
+
+def test_one_click_switches_the_resume_of_a_single_email_and_its_draft(env: Env) -> None:
+    prepared(env, contacts=2)
+    with serving(env) as page:
+        page.post("/emails/1/approve")
+        reply = page.post("/emails/resume", {"email": "1", "variant": "ml"})
+
+    assert reply.status == 200
+    assert "Resume switched for 1 email(s)." in reply.body
+    first, second = email_rows(env)
+    assert (first["resume_variant"], first["status"]) == ("ml", "written")  # approved, so back to review
+    assert first["resume_path"] == str(env.root / "resumes" / VARIANT_FILES["ml"])
+    assert second["resume_variant"] == "software"
+    assert env.gmail.calls_to("update_draft") == [first["draft_id"]]
+    attached = [part.get_filename() for part in env.gmail.draft(first["draft_id"]).iter_attachments()]
+    assert attached == [VARIANT_FILES["ml"]]
+
+
+def test_the_ticked_emails_across_company_groups_switch_together(env: Env) -> None:
+    two_companies(env)
+    write_for_all(env, {**env.contact_ids("Acme"), **env.contact_ids("Globex")})
+    assert env.prepare().code == 0
+    with serving(env) as page:
+        reply = page.post("/emails/resume", {"email": ["1", "3"], "variant": "ai"})
+    assert reply.status == 200
+    assert [r["resume_variant"] for r in email_rows(env)] == ["ai", "software", "ai"]
+
+
+@pytest.mark.parametrize("data", [
+    {"variant": "ml"},
+    {"email": "1", "variant": "../../etc/passwd"},
+    {"email": "99", "variant": "ml"},
+    {"email": "x", "variant": "ml"},
+])
+def test_a_resume_switch_needs_known_emails_and_a_known_variant(env: Env, data: dict[str, str]) -> None:
+    prepared(env, contacts=1)
+    with serving(env) as page:
+        reply = page.post("/emails/resume", data)
+    assert reply.status in (400, 404)
+    assert email_rows(env)[0]["resume_variant"] == "software"
+
+
+def test_the_page_offers_one_click_resume_buttons_and_wraps_long_bodies(env: Env) -> None:
+    prepared(env, contacts=2)
+    with serving(env) as page:
+        body = page.get().body
+    assert 'action="/emails/resume"' in body and 'id="pick"' in body
+    assert 'name="email" value="1" form="pick"' in body
+    assert 'value="ml" aria-pressed="false"' in body and 'value="software" aria-pressed="true"' in body
+    assert "white-space:pre-wrap" in body
 
 
 def test_an_email_with_a_bad_resume_cannot_be_approved(env: Env) -> None:
@@ -429,7 +502,8 @@ def test_a_confirmed_email_can_no_longer_be_changed(env: Env) -> None:
         edit = page.post("/emails/1/edit", {"subject": "Late", "body": "Late"})
         reject = page.post("/emails/1/reject")
         resume = page.post("/groups/1/resume", {"variant": "ml"})
-    assert (edit.status, reject.status, resume.status) == (409, 409, 409)
+        one = page.post("/emails/resume", {"email": "1", "variant": "ml"})
+    assert (edit.status, reject.status, resume.status, one.status) == (409, 409, 409, 409)
     assert statuses(env) == ["ready_to_send"]
     assert email_rows(env)[0]["subject"] != "Late"
 

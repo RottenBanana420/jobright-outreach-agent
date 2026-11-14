@@ -5,7 +5,8 @@ HTML-escaped and the page ships with a CSP that forbids scripts. Changes are POS
 random token, a local Host header and (when sent) a local Origin, which blocks other web pages and DNS
 rebinding from driving it.
 
-Routes: GET /; POST /emails/<id>/(edit|approve|reject|skip), /groups/<id>/resume, /bulk-approve, /confirm-send.
+Routes: GET /; POST /emails/<id>/(edit|approve|reject|skip), /emails/resume (one or several ticked emails),
+/groups/<id>/resume, /bulk-approve, /confirm-send.
 """
 from __future__ import annotations
 
@@ -40,14 +41,55 @@ _NOTICES = {
 }
 
 _STYLE = """
-body{font:15px/1.45 system-ui,sans-serif;max-width:60rem;margin:1.5rem auto;padding:0 1rem;color:#1b1b1b}
-section{border:1px solid #bbb;border-radius:6px;padding:.8rem 1rem;margin:1rem 0}
-article{border-top:1px solid #ddd;padding-top:.7rem;margin-top:.7rem}
-textarea{width:100%;font:inherit} input[type=text]{width:100%;font:inherit}
-.warn{color:#8a4b00}.bad{color:#a00000;font-weight:600}.muted{color:#666}
-.notice{background:#eef6ee;border:1px solid #9c9;padding:.4rem .7rem}
-.err{background:#fdeeee;border:1px solid #c99;padding:.4rem .7rem}
-form{display:inline-block;margin:.2rem .3rem .2rem 0} .edit{display:block}
+:root{--fg:#1f1f1f;--muted:#6b6b6b;--line:#e4e1db;--bg:#f7f6f3;--card:#fff;--ok:#2f6b3c;--warn:#8a5a00;--bad:#a12a2a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:2rem 1rem 5rem}
+h1{font-size:1.35rem;font-weight:650;margin:0}
+h2{font-size:1.1rem;font-weight:650;margin:0}
+p{margin:.3rem 0}
+a{color:inherit}
+.muted,.meta{color:var(--muted)} .meta{font-size:.9rem}
+.warn{color:var(--warn)} .bad{color:var(--bad);font-weight:600}
+.notice,.err{border-radius:8px;padding:.6rem .8rem;margin:1rem 0}
+.notice{background:#e8f2ea;color:#1e4a28} .err{background:#f8e8e8;color:#6e1c1c}
+.bar{position:sticky;top:0;z-index:1;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:.6rem 0;margin:1rem 0 0;display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;font-size:.9rem}
+section.group{margin-top:2.5rem}
+.head{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem 1.1rem;margin:.8rem 0}
+.who{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.who strong{font-weight:600}
+.status{margin-left:auto;font-size:.78rem;padding:.05rem .55rem;border-radius:999px;background:#efede8;
+  color:var(--muted);white-space:nowrap}
+.status.approved{background:#e5f1e7;color:var(--ok)}
+.status.ready_to_send,.status.sending,.status.sent{background:#e7eef7;color:#2a5185}
+.status.failed,.status.uncertain{background:#f8e8e8;color:var(--bad)}
+.subject{font-weight:600;margin-top:.8rem}
+pre.body{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:.4rem 0 0}
+label{display:block;font-size:.82rem;color:var(--muted);margin:.8rem 0 .2rem}
+input[type=text],textarea{width:100%;font:inherit;padding:.45rem .6rem;border:1px solid var(--line);
+  border-radius:6px;background:#fff;color:inherit}
+textarea{resize:vertical;min-height:13rem;line-height:1.5}
+input[type=checkbox]{width:1rem;height:1rem;margin:0;align-self:center}
+form{margin:0}
+button{font:inherit;font-size:.88rem;padding:.3rem .8rem;border:1px solid #cdc9c1;border-radius:6px;
+  background:#fff;color:var(--fg);cursor:pointer}
+button:hover{background:#f1efea}
+button.primary{background:var(--fg);border-color:var(--fg);color:#fff}
+button.primary:hover{background:#3a3a3a}
+.row{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.8rem}
+.row .end{margin-left:auto;display:flex;gap:.4rem}
+.seg{display:inline-flex;border:1px solid #cdc9c1;border-radius:6px;overflow:hidden;vertical-align:middle}
+.seg button{border:0;border-radius:0;border-left:1px solid #cdc9c1;padding:.15rem .55rem;font-size:.8rem}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed=true]{background:var(--fg);color:#fff}
+.resume{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;font-size:.9rem;margin-top:.6rem}
+ul.findings{margin:.5rem 0 0;padding-left:1.1rem;color:var(--warn);font-size:.9rem}
+.flagged{font-size:.9rem;color:var(--warn)} .flagged ul{margin:.2rem 0 0;padding-left:1.1rem}
+.confirm input[type=text]{width:4.5rem;display:inline-block}
+.confirm label{display:inline-block;margin-right:.6rem}
 """
 
 
@@ -115,7 +157,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", _CSP)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Referrer-Policy", "no-referrer")
+        # Not `no-referrer`: under that policy browsers send `Origin: null` on the page's own form posts, which the
+        # Origin check below would refuse. `same-origin` still sends nothing to any other site.
+        self.send_header("Referrer-Policy", "same-origin")
         if location:
             self.send_header("Location", location)
         self.end_headers()
@@ -123,7 +167,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _page(self, status: int, title: str, message: str) -> None:
         self._send(status, f"<!doctype html><meta charset=utf-8><title>{_e(title)}</title><style>{_STYLE}</style>"
-                           f"<p class=err>{_e(message)}</p><p><a href=\"/\">Back to the review page</a></p>")
+                           f"<main><p class=err>{_e(message)}</p>"
+                           f"<p><a href=\"/\">Back to the review page</a></p></main>")
 
     def _local(self) -> bool:
         if self.headers.get("Host") not in (self.server.authority, f"localhost:{self.server.server_address[1]}"):
@@ -142,6 +187,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         query = urllib.parse.parse_qs(parsed.query)
         notice = _NOTICES.get(query.get("notice", [""])[0], "")
+        if query.get("notice") == ["resume-n"]:
+            notice = f"Resume switched for {_int(query.get('n', [''])[0])} email(s)."
         if query.get("notice") == ["bulk"]:
             n, left = (_int(query.get(k, [""])[0]) for k in ("n", "left"))
             notice = (f"Bulk approved {n} email(s); {left} left because of a blocked resume. "
@@ -154,14 +201,17 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._local():
             return
         origin = self.headers.get("Origin")
-        if origin is not None and origin != f"http://{self.server.authority}":
+        port = self.server.server_address[1]
+        if origin is not None and origin not in (f"http://{self.server.authority}", f"http://localhost:{port}"):
             self._page(403, "Forbidden", "Cross-origin request refused.")
             return
         length = _int(self.headers.get("Content-Length") or "0")
         if length > MAX_FORM_BYTES:
             self._page(413, "Too large", "The form is too large.")
             return
-        form = {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode(errors="replace")).items()}
+        fields = urllib.parse.parse_qs(self.rfile.read(length).decode(errors="replace"))
+        form = {k: v[0] for k, v in fields.items()}
+        ticked = fields.get("email", [])
         if not hmac.compare_digest(form.get("token", ""), self.server.token):
             self._page(403, "Forbidden", "Missing or wrong page token. Reload the review page.")
             return
@@ -169,7 +219,7 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             with closing(Store(self.server.db_path)) as store:
                 with store.transaction():
-                    location, to_sync = self._act(store, path, form)
+                    location, to_sync = self._act(store, path, form, ticked)
                 self._sync_drafts(store, to_sync)  # after the commit: no Gmail call holds the database lock
         except GmailError as e:
             self._page(502, "Gmail problem", f"{e} (your change is saved; the Gmail draft is brought up to date "
@@ -207,9 +257,23 @@ class _Handler(BaseHTTPRequestHandler):
         for email_id in email_ids:
             drafts.sync_draft(store, self.server.gmail, self.server.config, email_id)
 
-    def _act(self, store: Store, path: str, form: dict[str, str]) -> tuple[str | None, list[int]]:
-        """Do the change in the open transaction. Returns where to go next and the emails whose draft needs syncing."""
+    def _act(
+        self, store: Store, path: str, form: dict[str, str], ticked: list[str],
+    ) -> tuple[str | None, list[int]]:
+        """Do the change in the open transaction. Returns where to go next and the emails whose draft needs syncing.
+
+        `ticked` holds every `email` field of the form: the emails a resume switch applies to.
+        """
         run_id, config = self.server.run_id, self.server.config
+        if path == "/emails/resume":
+            ids = []
+            for value in dict.fromkeys(ticked):  # the same email ticked twice counts once
+                row = store.get_email(_int(value))
+                if row is None or row["run_id"] != run_id:
+                    raise LookupError(f"Outreach Email {value} does not exist")
+                ids.append(int(row["id"]))
+            emails.switch_email_resume(store, config, ids, form.get("variant", ""))
+            return f"/?notice=resume-n&n={len(ids)}#email-{ids[0]}", ids
         if m := re.fullmatch(r"/emails/(\d+)/(edit|approve|reject|skip)", path):
             email_id, action = int(m.group(1)), m.group(2)
             row = store.get_email(email_id)
@@ -247,65 +311,90 @@ def _int(text: str) -> int:
 # --- rendering ---------------------------------------------------------------------------------
 
 
-def _safe_link(url: str) -> str:
-    """The LinkedIn URL as a link only when it is plain https; otherwise as inert text."""
-    if re.fullmatch(r"https://[^\s<>\"']+", url):
-        return f'<a href="{_e(url)}" rel="noopener noreferrer">{_e(url)}</a>'
-    return _e(url)
-
-
-def _form(action: str, token: str, inner: str, extra_class: str = "") -> str:
-    return (f'<form method="post" action="{_e(action)}" class="{extra_class}">'
+def _form(action: str, token: str, inner: str, extra_class: str = "", form_id: str = "") -> str:
+    ident = f' id="{_e(form_id)}"' if form_id else ""
+    return (f'<form method="post" action="{_e(action)}" class="{extra_class}"{ident}>'
             f'<input type="hidden" name="token" value="{_e(token)}">{inner}</form>')
 
 
-def _render_email(row: sqlite3.Row, token: str, locked: bool) -> str:
+def _variant_buttons(config: Config, current: str | None) -> str:
+    """One button per Resume Variant, the current one pressed: switching is a single click (no script needed)."""
+    buttons = "".join(
+        f'<button name="variant" value="{_e(v)}" aria-pressed="{"true" if v == current else "false"}">'
+        f'{_e(v.replace("_", " "))}</button>'
+        for v in config.resume_files
+    )
+    return f'<span class="seg">{buttons}</span>'
+
+
+def _render_email(row: sqlite3.Row, config: Config, token: str, locked: bool) -> str:
     findings = json.loads(row["findings"])
     contact_groups = ", ".join(json.loads(row["jobright_groups"]))
+    email_id = row["id"]
+    tick = "" if locked else (f'<input type="checkbox" name="email" value="{email_id}" form="pick" '
+                              f'aria-label="Select {_e(row["contact_name"])}">')
+    about = [_e(row["category"]), f"Jobright group: {_e(contact_groups)}"]
+    if row["connection"]:
+        about.append(_e(row["connection"]))
+    about.append(_safe_link(row["linkedin_url"], "LinkedIn"))
     parts = [
-        f'<article id="email-{row["id"]}">',
-        f'<p><strong>{_e(row["contact_name"])}</strong> &middot; {_e(row["contact_title"])} &middot; '
-        f'category {_e(row["category"])} &middot; Jobright group: {_e(contact_groups)}'
-        + (f' &middot; {_e(row["connection"])}' if row["connection"] else "") + "<br>"
-        f'LinkedIn: {_safe_link(row["linkedin_url"])}<br>'
-        f'To: {_e(row["address"])} <span class="warn">(Unverified Address: Jobright says it found this '
-        "from public information, so it may be wrong)</span> "
-        f'&middot; Status: <strong>{_e(row["status"])}</strong></p>',
+        f'<article class="card" id="email-{email_id}">',
+        f'<div class="who">{tick}<strong>{_e(row["contact_name"])}</strong>'
+        f'<span class="muted">{_e(row["contact_title"])}</span>'
+        f'<span class="status {_e(row["status"])}">{_e(row["status"])}</span></div>',
+        f'<p class="meta">{" &middot; ".join(about)}</p>',
+        f'<p class="meta">To <strong>{_e(row["address"])}</strong> <span class="warn">&middot; Unverified Address: '
+        "Jobright says it found this from public information, so it may be wrong</span></p>",
     ]
+    file_name = _e(Path(row["resume_path"]).name)
+    if locked:
+        parts.append(f'<div class="resume">Resume: <strong>{_e(row["resume_variant"])}</strong>'
+                     f'<span class="muted">{file_name}</span></div>')
+    else:
+        parts.append(_form("/emails/resume", token,
+                           f'<input type="hidden" name="email" value="{email_id}">Resume '
+                           f'{_variant_buttons(config, row["resume_variant"])}<span class="muted">{file_name}</span>',
+                           "resume"))
     if row["block_reason"]:
         parts.append(f'<p class="bad">Blocked: {_e(row["block_reason"])}</p>')
     if findings:
         items = "".join(f"<li>{_e(f['message'])}</li>" for f in findings)
-        parts.append(f'<ul class="warn">{items}</ul>')
+        parts.append(f'<ul class="findings">{items}</ul>')
     if locked:
-        parts.append(f"<p><strong>{_e(row['subject'])}</strong></p><pre>{_e(row['body'])}</pre>")
+        parts.append(f'<p class="subject">{_e(row["subject"])}</p><pre class="body">{_e(row["body"])}</pre>')
     else:
-        edit = (f'<label>Subject <input type="text" name="subject" value="{_e(row["subject"])}"></label>'
-                f'<label>Body <textarea name="body" rows="9">{_e(row["body"])}</textarea></label>'
-                "<button>Save edits</button>")
-        parts.append(_form(f"/emails/{row['id']}/edit", token, edit, "edit"))
-        buttons = "".join(
-            _form(f"/emails/{row['id']}/{action}", token, f"<button>{label}</button>")
-            for action, label in (("approve", "Approve"), ("reject", "Reject"), ("skip", "Skip"))
+        edit = (f'<label for="subject-{email_id}">Subject</label>'
+                f'<input type="text" id="subject-{email_id}" name="subject" value="{_e(row["subject"])}">'
+                f'<label for="body-{email_id}">Body</label>'
+                f'<textarea id="body-{email_id}" name="body" rows="10">{_e(row["body"])}</textarea>')
+        parts.append(_form(f"/emails/{email_id}/edit", token, edit, form_id=f"edit-{email_id}"))
+        decisions = "".join(
+            _form(f"/emails/{email_id}/{action}", token, f'<button class="{cls}">{label}</button>')
+            for action, label, cls in (("approve", "Approve", "primary"), ("reject", "Reject", ""),
+                                       ("skip", "Skip", ""))
         )
-        parts.append(f"<div>{buttons}</div>")
+        parts.append(f'<div class="row"><button form="edit-{email_id}">Save edits</button>'
+                     f'<span class="end">{decisions}</span></div>')
     parts.append("</article>")
     return "".join(parts)
 
 
-def _render_resume(group_rows: list[sqlite3.Row], config: Config, token: str) -> str:
-    first = group_rows[0]
-    variants = "".join(
-        f'<option value="{_e(v)}"{" selected" if v == first["resume_variant"] else ""}>{_e(v)}</option>'
-        for v in config.resume_files
-    )
-    locked = all(r["status"] in emails.LOCKED for r in group_rows)
-    switch = "" if locked else _form(
-        f"/groups/{first['group_id']}/resume", token,
-        f'<label>Resume Variant <select name="variant">{variants}</select></label><button>Switch</button>',
-    )
-    return (f"<p>Resume: <strong>{_e(first['resume_variant'])}</strong> "
-            f"({_e(Path(first['resume_path']).name)}) {switch}</p>")
+def _render_group_resume(group_rows: list[sqlite3.Row], config: Config, token: str, company: str) -> str:
+    variants = {r["resume_variant"] for r in group_rows}
+    current = next(iter(variants)) if len(variants) == 1 else None
+    if all(r["status"] in emails.LOCKED for r in group_rows):
+        shown = current or "mixed"
+        return f'<div class="resume">Resume for everyone: <strong>{_e(shown)}</strong></div>'
+    mixed = "" if current else '<span class="muted">mixed; one click sets all</span>'
+    return _form(f"/groups/{group_rows[0]['group_id']}/resume", token,
+                 f"Resume for everyone at {_e(company)} {_variant_buttons(config, current)}{mixed}", "resume")
+
+
+def _safe_link(url: str, label: str | None = None) -> str:
+    """The LinkedIn URL as a link only when it is plain https; otherwise as inert text."""
+    if re.fullmatch(r"https://[^\s<>\"']+", url):
+        return f'<a href="{_e(url)}" rel="noopener noreferrer" title="{_e(url)}">{_e(label or url)}</a>'
+    return _e(url)
 
 
 def _flag_reason(contact: sqlite3.Row) -> str:
@@ -326,7 +415,7 @@ def _render_flagged(contacts: list[sqlite3.Row]) -> str:
         f"{_e(_flag_reason(c))}</li>"
         for c in contacts
     )
-    return f'<div class="warn"><p>Flagged for review, no Outreach Email:</p><ul>{items}</ul></div>'
+    return f'<div class="flagged"><p>Flagged for review, no Outreach Email:</p><ul>{items}</ul></div>'
 
 
 def _drafts_note(group_rows: list[sqlite3.Row], dry: bool) -> str:
@@ -340,17 +429,21 @@ def render_page(store: Store, config: Config, run_id: int, token: str, notice: s
     rows = store.run_emails(run_id)
     shown = emails.totals(store, run_id)
     dry = bool(run["dry_run"])
-    out = [f"<!doctype html><meta charset=utf-8><title>Outreach review {_e(run['run_date'])}</title>"
-           f"<style>{_STYLE}</style><h1>Outreach review, {_e(run['run_date'])}</h1>"]
-    if dry:
-        out.append("<p class=\"warn\"><strong>Dry run:</strong> no Gmail drafts exist and nothing can be sent.</p>")
-    if notice:
-        out.append(f'<p class="notice">{_e(notice)}</p>')
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no emails"
-    out.append(f"<p>{len(rows)} Outreach Email(s): {_e(summary)}.</p>")
+    out = [f"<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\">"
+           f"<title>Outreach review {_e(run['run_date'])}</title><style>{_STYLE}</style><main>"
+           f"<h1>Outreach review, {_e(run['run_date'])}</h1>"
+           f'<p class="muted">{len(rows)} Outreach Email(s): {_e(summary)}.</p>']
+    if dry:
+        out.append('<p class="warn"><strong>Dry run:</strong> no Gmail drafts exist and nothing can be sent.</p>')
+    if notice:
+        out.append(f'<p class="notice">{_e(notice)}</p>')
+    if any(r["status"] not in emails.LOCKED for r in rows):
+        out.append(_form("/emails/resume", token,
+                         f"Set the resume of the ticked emails {_variant_buttons(config, None)}", "bar", "pick"))
 
     flagged: dict[int, list[sqlite3.Row]] = {}
     for contact in store.flagged_contacts(run_id):
@@ -362,31 +455,34 @@ def render_page(store: Store, config: Config, run_id: int, token: str, notice: s
             for a in store.group_applications(group["id"])
         )
         picked = f"{group['contacts_picked']} of {group['contact_cap']}" if group["contact_cap"] is not None else "?"
+        counts_line = (f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: {_drafts_note(group_rows, dry)}"
+                       if group_rows else "no Outreach Emails for this Company Group")
         out.append(
-            f'<section id="group-{group["id"]}"><h2>{_e(group["name"])} <small class="muted">Rank {group["rank"]}'
-            f"</small></h2><p>Roles: {roles}</p><p>Contacts: {_e(picked)} &middot; "
-            + (f"Outreach Emails: {len(group_rows)} &middot; Gmail drafts: {_drafts_note(group_rows, dry)}</p>"
-               if group_rows else "no Outreach Emails for this Company Group</p>")
+            f'<section class="group" id="group-{group["id"]}"><div class="head"><h2>{_e(group["name"])}</h2>'
+            f'<span class="muted">Rank {group["rank"]}</span></div>'
+            f'<p class="meta">Roles: {roles}</p>'
+            f'<p class="meta">Contacts: {_e(picked)} &middot; {counts_line}</p>'
         )
         if group_rows:
-            out.append(_render_resume(group_rows, config, token))
+            out.append(_render_group_resume(group_rows, config, token, str(group["name"])))
         out.append(_render_flagged(flagged.get(group["id"], [])))
-        out.extend(_render_email(r, token, r["status"] in emails.LOCKED) for r in group_rows)
+        out.extend(_render_email(r, config, token, r["status"] in emails.LOCKED) for r in group_rows)
         out.append("</section>")
 
     confirm = _form("/confirm-send", token, (
         f"<p><strong>{shown.emails} approved email(s) to {shown.recipients} recipient(s).</strong> "
         "Rejected, skipped and unreviewed emails are never sent.</p>"
-        '<label>Type the number of emails <input type="text" name="emails" size="4" autocomplete="off"></label> '
-        '<label>and of recipients <input type="text" name="recipients" size="4" autocomplete="off"></label> '
-        "<button>Confirm</button>"
-    ))
+        '<div class="row"><label>Number of emails <input type="text" name="emails" autocomplete="off"></label>'
+        '<label>Number of recipients <input type="text" name="recipients" autocomplete="off"></label>'
+        '<button class="primary">Confirm</button></div>'
+    ), "confirm")
     waiting = [r for r in rows if r["status"] == "written"]
     blocked = sum(1 for r in waiting if r["block_reason"])
     bulk = _form("/bulk-approve", token, "<button>Bulk approve</button>")
-    out.append(f"<section><h2>Approval</h2>{bulk}"
-               f'<p class="muted">{len(waiting)} waiting for review, {blocked} with a blocked resume. '
+    out.append(f'<section class="group"><h2>Approval</h2><div class="card">{bulk}'
+               f'<p class="meta">{len(waiting)} waiting for review, {blocked} with a blocked resume. '
                "Bulk approve approves every email still waiting for review, including ones with findings "
                "(findings do not block Approval) but not ones with a blocked resume; "
-               f"those stay until you switch the Resume Variant or fix the file.</p>{confirm}</section>")
+               f"those stay until you switch the Resume Variant or fix the file.</p></div>"
+               f'<div class="card">{confirm}</div></section></main>')
     return "".join(out)

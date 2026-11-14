@@ -139,4 +139,4 @@ Stop at once and tell the user, in one short message, **which problem it is and 
 
 ## Final report
 
-Say how many Today's Applications and Company Groups there were, how many Contacts were picked ("N of M" per company), how many emails are on the review page, any skipped Contacts and why, anything on the not-yet-verified list that you noticed, and that nothing was sent.
+Say how many Today's Applications and Company Groups there were, how many Contacts were picked ("N of M" per company), how many emails are on the review page, any skipped Contacts and why, anything on the not-yet-verified list that you noticed, and what was sent: the count from the `outreach prepare` output ("sent N"), or that nothing was sent (a dry run, or the review was not confirmed).
