@@ -153,7 +153,7 @@ Every problem you cannot fix yourself ends the Run the same way, so the user is 
 | Gmail is not answering | an `outreach` command fails with "no answer from Gmail", "cannot reach Google sign-in" or a Gmail limit | check the internet connection, or wait for the Gmail limit to reset |
 | A file was rejected | an `outreach` command rejects a file and one fix-and-retry did not clear it | quote the error; the command or the files need a look |
 
-Try each fix of your own only once. Do not retry in a loop, and do not try to bypass the problem.
+Try each fix of your own only once. Do not retry in a loop, and do not try to bypass the problem. Never ask the user what to do (you have no question tool, and they may be away): when you are stuck, halt with the closest name above.
 
 These are **not** problems, and the Run carries on or ends by itself: no Applied card dated today (step 2), an empty Shortlist (step 3), a group with fewer Contacts than the cap (step 5), a Contact with no address (step 6a: skip them), and nothing to review (step 7).
 
