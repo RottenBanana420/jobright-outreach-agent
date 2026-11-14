@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jobright Outreach</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Jobright Outreach</h1>
+<p>Jobright Outreach is an open-source tool that runs on your own computer with Claude Code. After you apply for jobs on Jobright, it finds the applications you submitted that day, picks the recruiters and engineers Jobright suggests at each company, and writes one short, personal email to each.</p>
+
+<h2>How it uses Gmail</h2>
+<p>Every email is saved as a draft in your own Gmail account and shown on a review page on your computer. Nothing is sent until you approve it. Approved emails are sent one at a time through the Gmail API from your account, with your resume attached, and labelled "Outreach" in Gmail.</p>
+<p>The tool signs in to Gmail with Google's OAuth. It asks for one permission, <code>gmail.modify</code>, so it can create and send drafts, check your Sent folder so an email is never sent twice, and apply the "Outreach" label.</p>
+
+<h2>Who runs it</h2>
+<p>Each person runs their own copy with their own Google Cloud project and Gmail sign-in. The project's author doesn't run a server, doesn't receive your data and can't send email on your behalf.</p>
+
+<p><a href="privacy.html">Privacy policy</a> · <a href="https://github.com/RottenBanana420/jobright-outreach-agent">Source code on GitHub</a></p>
+
+<footer>Not affiliated with Jobright or Google.</footer>
+</body>
+</html>
