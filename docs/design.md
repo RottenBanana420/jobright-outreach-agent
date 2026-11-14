@@ -24,11 +24,11 @@ Settled during the design interview on 2026-11-12. Terms in bold are defined in 
 - All three Jobright groups are used: "Beyond Your Network", "From Your School" and "From Your Previous Company". Eligible school and previous-company Contacts are picked first, since the shared school or employer is a real connection the email can mention. Then the Contact Category order applies.
 - **Unverified Addresses** are accepted; bounces are recorded so the address is not reused.
 - One **Outreach Email** per Contact per Company Group, naming every role applied to there. 30-day cooldown flag for repeat Contacts.
-- Emails are written from the job description, the resume and the **Jobright Draft**, 80–140 words, then passed through the work-humanizer skill in Rewrite mode, with its `check.py` as a lint.
+- Emails are written from the job description, the resume and the **Jobright Draft**, 80–140 words, then passed through the project's `outreach-humanizer` skill (`.claude/skills/outreach-humanizer/`, a copy of phuryn/work-humanizer) in Rewrite mode, with its `check.py` as a lint.
 
 ## Resume Variant mapping
 
-Files live in `~/Documents/Career/Resumes/Technical (2027 New Grad)/`. First match on the role title wins:
+The Run reads copies kept in the project's `resumes/` folder (gitignored); the originals are in `~/Documents/Career/Resumes/Technical (2027 New Grad)/`. Copy a changed resume over by hand. First match on the role title wins:
 
 | Order | Title contains | Resume Variant |
 |---|---|---|
