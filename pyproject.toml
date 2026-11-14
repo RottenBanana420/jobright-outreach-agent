@@ -24,6 +24,7 @@ packages = ["src/outreach"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["real_launcher: runs the real SystemLauncher (on harmless input)"]
 
 [tool.mypy]
 strict = true

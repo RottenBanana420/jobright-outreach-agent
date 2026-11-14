@@ -39,6 +39,7 @@ def test_terminate_ignores_a_process_that_is_already_gone() -> None:
     SystemLauncher().terminate(gone.pid)  # no error
 
 
+@pytest.mark.real_launcher
 def test_notify_without_osascript_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")  # no osascript, as on a Linux CI runner
 
