@@ -167,16 +167,24 @@ def edit_email(store: Store, config: Config, email_id: int, subject: str, body: 
 
 
 def switch_resume(store: Store, config: Config, group_id: int, variant: str) -> None:
-    if variant not in config.resume_files:
-        raise UserError(f"resume: unknown Resume Variant {variant!r} (known: {', '.join(config.resume_files)})")
+    """Point every Outreach Email of a Company Group at one Resume Variant (per-email choices included)."""
     rows = store.run_emails_for_group(group_id)
     if not rows:
         raise LookupError(f"Company Group {group_id} has no Outreach Emails")
-    for row in rows:
-        _editable(store, row["id"])
+    switch_email_resume(store, config, [int(r["id"]) for r in rows], variant)
+
+
+def switch_email_resume(store: Store, config: Config, email_ids: list[int], variant: str) -> None:
+    """Attach `variant` to each of these Outreach Emails. An approved one goes back to waiting for review."""
+    if variant not in config.resume_files:
+        raise UserError(f"resume: unknown Resume Variant {variant!r} (known: {', '.join(config.resume_files)})")
+    if not email_ids:
+        raise UserError("resume: tick at least one email")
+    rows = [_editable(store, i) for i in email_ids]
     path = resume_path(config, variant)
-    store.update_group_resume(group_id, variant, str(path), check_resume(path))
+    block = check_resume(path)
     for row in rows:
+        store.update_email_resume(int(row["id"]), variant, str(path), block)
         store.log_edit("outreach_emails", row["id"], f"resume switched to {variant} ({path.name})")
         _reopen(store, row, "resume switched after approval")
 

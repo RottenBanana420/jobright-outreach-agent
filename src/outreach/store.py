@@ -456,11 +456,11 @@ class Store:
             (subject, body, content_hash, findings, email_id),
         )
 
-    def update_group_resume(self, group_id: int, variant: str, path: str, block_reason: str | None) -> None:
-        """Point every Outreach Email of a Company Group at one Resume Variant."""
+    def update_email_resume(self, email_id: int, variant: str, path: str, block_reason: str | None) -> None:
+        """Point one Outreach Email at a Resume Variant."""
         self._con.execute(
-            "UPDATE outreach_emails SET resume_variant = ?, resume_path = ?, block_reason = ? WHERE group_id = ?",
-            (variant, path, block_reason, group_id),
+            "UPDATE outreach_emails SET resume_variant = ?, resume_path = ?, block_reason = ? WHERE id = ?",
+            (variant, path, block_reason, email_id),
         )
 
     def get_group(self, group_id: int) -> sqlite3.Row:
