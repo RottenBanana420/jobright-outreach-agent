@@ -160,6 +160,31 @@ In order, cheapest and safest first. Each uses its own `--data-dir data/test/<n>
 
 Not tested for real, by design: the Gmail sending limit (fakes), a CAPTCHA or rate limit (replay at most), a real Google revoke (only if the user accepts re-signing in), usage limits and context exhaustion (observe when they happen).
 
+## Progress (checkpoint)
+
+Checkpoint 2026-11-14. Paused to build before testing further.
+
+| Test | Result |
+|---|---|
+| Stand-in Claude, 12 scripted scenarios through the real `outreach start` (quit, no applications, none applied, no addresses, review confirmed, 8 halts) | all pass; no stray processes |
+| Resume after a halt and after `outreach stop` | pass |
+| Gmail adapter against real Google, on token copies: healthy, corrupted (`invalid_grant`), `HTTPS_PROXY` to a dead port | pass; messages as expected, so the `invalid_grant` inference holds |
+| Real Claude, practice run, no applications today | pass: Run ended by itself |
+| Real Claude, broken Gmail token copy, non-dry Run | pass: halted "Gmail sign-in expired" |
+| Real Claude, rejected file (`data/test/a`) | found a bug, fixed: Claude asked the user a question instead of halting. `outreach start` now passes `--disallowedTools=AskUserQuestion` (written with `=`: the variadic flag otherwise swallows the prompt). Rerun: halted by itself with "A file was rejected" |
+
+Not yet done, in this order:
+
+1. **Gmail connector** (set up in `data/test/b`: an empty applications list, no `bounces.json`). The user disconnects the Gmail connector at claude.ai/customize/connectors, opens a fresh terminal, runs `uv run outreach start --dry-run --data-dir data/test/b --db data/test/b.db --config data/test/outreach.test.toml`, then reconnects. Open question: does a disconnected connector fail or just vanish from Claude's tools, and does Claude still halt?
+2. **Chrome not connected**: extension off at start, and Chrome quit mid-Run. Watch for the install prompt.
+3. **Signed out of Jobright**: expect a halt, not a pause.
+4. **Quitting**: read the exit code and status the Run records; resume.
+5. **Optional**: Wi-Fi off mid-Run; DevTools Offline or Local Overrides for "blocked" and "page changed".
+
+Open risks to look at during 2 and 3: Claude Code's own "allow this action?" prompts. The user's settings pre-approve only a few Chrome tools, so a real Jobright step may still prompt. `dontAsk` mode would deny instead, but could break a working Run, so it is untried.
+
+The test folders `data/test/a` and `data/test/b` and `data/test/outreach.test.toml` are still in place (gitignored). Delete `data/test` when the testing is done.
+
 ## Sources
 
 - Use Claude Code with Chrome: https://code.claude.com/docs/en/chrome

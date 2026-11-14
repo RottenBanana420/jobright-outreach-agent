@@ -37,6 +37,8 @@ The two halves pass JSON files through a Run folder (`data/<date>/`).
 
 A stopped or crashed Run picks up where it left off when you run `outreach start` again the same day. Nothing already read or written is redone.
 
+A Run never sits waiting. With no applications today, or no email to review, it ends by itself. When Claude hits something it can't fix (signed out of Jobright, a CAPTCHA, Gmail not connected, an expired Gmail sign-in), it stops the Run, `outreach start` prints what to fix, and the menu shows it until the next Run. Claude has no way to ask a question mid-Run.
+
 ## How it stays safe
 
 - Nothing is sent without your explicit approval. Rejected, skipped and unreviewed emails never go out, and the final confirmation must match the number of approved emails and recipients.
@@ -116,7 +118,7 @@ Working end to end. The full Run, from `outreach start` to labelled sent emails,
 | 5. Email writing, linting and resume choice | Done |
 | 6. Gmail drafts and controlled sending | Done |
 | 7. Review page and Approval | Done |
-| 8. Testing | 320 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
+| 8. Testing | 331 automated tests; failure handling checked end to end with a stand-in Claude and partly against the real services ([progress](docs/research/real-world-failure-testing.md#progress-checkpoint)); live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
 
 Next up: packaging the agent so others can install it ([#26](https://github.com/RottenBanana420/jobright-outreach-agent/issues/26)).
 
