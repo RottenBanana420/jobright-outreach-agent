@@ -5,10 +5,10 @@ Settled during the design interview on 2026-11-12. Terms in bold are defined in 
 ## Running it
 
 - `outreach start` is a terminal command, typed in a normal terminal tab. It starts `caffeinate` tied to the **Run**, opens Claude Code with Chrome enabled (visible mode: you can watch and step in), then hands off to the Python review page.
-- `outreach stop` cancels a **Run** early. Otherwise the **Run** ends by itself once approved emails are sent, and `caffeinate` exits with it.
+- `outreach stop` cancels a **Run** early. Otherwise the **Run** ends by itself once the review page has closed and the approved emails are sent: Claude Code gets 30 seconds for its final report, then `outreach start` ends it, and `caffeinate` exits with it.
 - The user starts every Run by hand. No cron, no schedule, no always-on agent. One pass per start.
 - Claude runs in visible mode: a terminal window shows its work and the user can step in. Headless mode was tested in Milestone 2 and works, but is not used.
-- The only pause is email review. The review page opens in the browser when it is ready, with a Mac notification.
+- The only pause is email review. The review page opens in the default browser by itself when it is ready, with a Mac notification.
 
 ## Selecting applications
 
@@ -40,7 +40,7 @@ The Run reads copies kept in the project's `resumes/` folder (gitignored); the o
 
 - Outreach Emails always attach the user's own Resume Variant. Jobright's per-application custom resumes are for applications only and are never attached.
 - A Company Group with several roles uses the variant of its highest-Match-Score role.
-- The review page shows the chosen variant and lets the user switch it.
+- The review page shows the chosen variant and lets the user switch it for one email, for every email of a Company Group, or for several ticked emails at once.
 - Before attaching: file exists, is a readable PDF, under 25 MB.
 
 ## Gmail
@@ -49,6 +49,8 @@ The Run reads copies kept in the project's `resumes/` folder (gitignored); the o
 - Drafts and sends go through the Gmail API (see [research](research/gmail-mcp-vs-api.md)). The Gmail connector is used only for read-only checks for bounces and replies.
 - Each draft has exactly one recipient, the Contact, with no CC or BCC.
 - Sent Outreach Emails get the Gmail label "Outreach". Labels are mailbox-only; recipients never see them.
+- For a live test, `test_recipient` sends every email to a plus-address of the user's own inbox instead of the Contact (see [review-handoff-files.md](review-handoff-files.md#live-test-mode-test_recipient)).
+- Google Cloud and Gmail setup is walked through by `scripts/setup-wizard.sh`.
 
 ## Open, low priority
 
