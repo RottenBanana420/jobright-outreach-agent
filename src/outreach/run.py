@@ -63,7 +63,11 @@ class SystemLauncher:
         if not COMMAND_FILE.exists():
             raise UserError(f"{COMMAND_FILE}: not found; run `outreach start` from the project folder")
         try:
-            proc = subprocess.Popen(["claude", "--chrome", "--model", model, prompt])
+            # The user may be away: Claude must never wait on a question. `AskUserQuestion` is removed from its
+            # tools, so a problem it cannot fix ends the Run (`outreach halt`). The `=` form keeps the variadic flag
+            # from swallowing the prompt.
+            argv = ["claude", "--chrome", "--model", model, "--disallowedTools=AskUserQuestion", prompt]
+            proc = subprocess.Popen(argv)
         except FileNotFoundError:
             raise UserError("claude: command not found; install Claude Code and make sure it is on PATH") from None
         on_started(proc.pid)

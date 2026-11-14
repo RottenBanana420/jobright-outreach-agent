@@ -9,7 +9,7 @@ Typed by hand in a terminal, from the project folder. There is no schedule and n
 1. creates the Run folder `D/<date>` (`D` defaults to `data`; the date is today in the configured timezone) and the Run row, or finds them again when this is a resume;
 2. writes `run_state.json` in the Run folder (below) and marks the Run `running`;
 3. starts `caffeinate -dis -w <pid of outreach start>`, so the Mac stays awake and the hold also ends if `outreach start` dies;
-4. runs `claude --chrome --model <config model> "/outreach-run <run-dir>"` in the foreground, in this terminal, and waits;
+4. runs `claude --chrome --model <config model> --disallowedTools=AskUserQuestion "/outreach-run <run-dir>"` in the foreground, in this terminal, and waits (Claude has no question tool, so it can never wait for an answer: a problem it cannot fix ends the Run with `outreach halt`);
 5. when Claude Code exits, ends `caffeinate` and marks the Run `ended` (exit code 0) or `failed` (any other code; `outreach start` exits 1 and says to run it again).
 6. while Claude Code runs, checks every 2 seconds whether the Run is `reviewed` (below). Once it is, Claude Code gets 30 seconds to print its final report, then `start` ends it and its child processes and marks the Run `ended`, whatever the exit code.
 
