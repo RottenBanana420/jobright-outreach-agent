@@ -117,7 +117,6 @@ class SystemLauncher:
         except OSError:
             pass  # no `open` (not a Mac): the URL is still printed and in the notification
 
-
     def run_wizard(self, script: Path) -> int:
         """Run a bash wizard (the setup wizard) in this terminal and wait for it."""
         if not script.exists():
