@@ -1,7 +1,7 @@
 ---
 description: Do the browser half of an outreach Run (started by `outreach start`): read today's Applications, find and reveal Contacts, write the Outreach Emails, open the review page
 argument-hint: <run-dir>
-allowed-tools: Bash(uv run outreach:*)
+allowed-tools: Bash(uv run outreach:*), Bash(python3 ~/.claude/skills/work-humanizer/check.py:*), Read(~/.claude/skills/work-humanizer/**), Skill(work-humanizer), mcp__claude_ai_Gmail__search_threads, mcp__claude_ai_Gmail__get_thread, mcp__claude_ai_Gmail__get_message
 ---
 
 You are doing the browser half of one outreach **Run** for the user, who is watching this window. Python (`uv run outreach ...`, run from the project folder) owns ranking, Contact picking, resumes, linting, SQLite, Gmail and the review page; you read Jobright through Claude in Chrome, write JSON handoff files and call the CLI at fixed points (ADR 0001). Terms follow `GLOSSARY.md`: an Outreach Email is one email to one Contact about one Company Group; "Draft" means a Gmail draft or the Jobright Draft.
