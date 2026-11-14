@@ -39,3 +39,6 @@ outreach.toml
 .DS_Store
 .idea/
 .vscode/
+
+# Local explainer pages for understanding the project (not part of the product)
+understanding/
