@@ -5,7 +5,7 @@ Settled during the design interview on 2026-11-12. Terms in bold are defined in 
 ## Running it
 
 - `outreach start` is a terminal command, typed in a normal terminal tab. It starts `caffeinate` tied to the **Run**, opens Claude Code with Chrome enabled (visible mode: you can watch and step in), then hands off to the Python review page.
-- `outreach stop` cancels a **Run** early. Otherwise the **Run** ends by itself once the review page has closed and the approved emails are sent, or once `outreach shortlist` finds nothing to follow up today: Claude Code gets 30 seconds for its final report, then `outreach start` ends it, and `caffeinate` exits with it.
+- `outreach stop` cancels a **Run** early. Otherwise the **Run** ends by itself once the review page has closed and the approved emails are sent, or once there is nothing to review (no applications today, or no Contact with an address), or once Claude ends it on a problem it cannot fix with `outreach halt` (the menu then shows the problem): Claude Code gets 30 seconds for its final report, then `outreach start` ends it, and `caffeinate` exits with it.
 - The user starts every Run by hand. No cron, no schedule, no always-on agent. One pass per start.
 - Claude runs in visible mode: a terminal window shows its work and the user can step in. Headless mode was tested in Milestone 2 and works, but is not used.
 - The only pause is email review. The review page opens in the default browser by itself when it is ready, with a Mac notification.

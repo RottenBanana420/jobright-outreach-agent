@@ -169,24 +169,31 @@ def start_run(
         store.set_run_processes(run_id, os.getpid(), None, None)
     caffeinate = launcher.start_caffeinate()
     code = 1
+    status = problem = ""
     try:
         # `outreach stop` can land at any point after the Run was marked running. Each pid is recorded only if the
         # Run was not stopped meanwhile, and a process that could not be recorded is ended on the spot.
         if _remember(db_path, run_id, caffeinate=caffeinate):
             code = launcher.run_claude(
                 f"/outreach-run {run_dir}", config.model, lambda pid: _remember_claude(db_path, run_id, launcher, pid),
-                lambda: _status(db_path, run_id) == "reviewed",
+                lambda: _status(db_path, run_id) in ("reviewed", "halted"),
             )
     finally:
         launcher.terminate(caffeinate)
         with closing(Store(db_path)) as store, store.transaction():
             store.set_run_processes(run_id, None, None, None)
             status = store.get_run(run_id)["status"]
-            if status == "reviewed":
+            if status == "halted":
+                problem = store.last_note(run_id, "halted")  # stays `halted`: the menu shows the problem
+            elif status == "reviewed":
                 code = 0  # `start` ended Claude Code itself because the review was done
                 store.set_status("runs", run_id, "ended", "review finished; Claude Code ended by outreach start")
             elif status != "stopped":
                 store.set_status("runs", run_id, "ended" if code == 0 else "failed", f"Claude Code exited with {code}")
+    if status == "halted":
+        print(f"outreach: the Run stopped: {problem}\nFix that, then run `outreach start` again: it picks up where "
+              "it left off.", file=sys.stderr)
+        return 1
     if code != 0 and _status(db_path, run_id) != "stopped":
         print(f"outreach: Claude Code exited with code {code}; run `outreach start` again to resume", file=sys.stderr)
         return 1
@@ -204,6 +211,16 @@ def mark_reviewed(store: Store, run_id: int, note: str = "review page closed") -
     run = store.get_run(run_id)
     if run["owner_pid"] is not None and run["status"] not in ("stopped", "reviewed"):
         store.set_status("runs", run_id, "reviewed", note)
+
+
+def halt_run(store: Store, run_id: int, problem: str) -> bool:
+    """Claude hit a problem it cannot fix (signed out, CAPTCHA, ...): a live Run ends and keeps the problem for the
+    menu. False outside a live Run, where nothing is marked."""
+    run = store.get_run(run_id)
+    if run["owner_pid"] is None or run["status"] in ("stopped", "reviewed", "halted"):
+        return False
+    store.set_status("runs", run_id, "halted", problem)
+    return True
 
 
 def _remember(db_path: Path, run_id: int, *, caffeinate: int | None = None, claude: int | None = None) -> bool:

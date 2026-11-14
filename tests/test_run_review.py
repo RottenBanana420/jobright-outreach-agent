@@ -122,6 +122,63 @@ def test_a_shortlist_outside_a_live_run_does_not_mark_the_run(env: Env) -> None:
     assert env.query("SELECT status FROM runs")[0]["status"] != "reviewed"
 
 
+PROBLEM = "Signed out of Jobright: sign in to Jobright in Chrome"
+
+
+def _halt(env: Env, problem: str = PROBLEM) -> int:
+    return main(["halt", str(env.run_dir), "--problem", problem, "--db", str(env.db)])
+
+
+def test_a_run_that_hits_a_problem_ends_by_itself_and_says_what_to_fix(
+    env: Env, capsys: pytest.CaptureFixture[str],
+) -> None:
+    launcher = FakeLauncher()
+    launcher.claude_hook = lambda: _halt(env)
+
+    assert _start(env, launcher) == 1
+
+    assert launcher.ended_after_review == [True]
+    [run] = env.query("SELECT status FROM runs")
+    assert run["status"] == "halted"
+    err = capsys.readouterr().err
+    assert PROBLEM in err
+    assert "outreach start" in err  # how to resume
+
+
+def test_halt_outside_a_live_run_does_not_mark_the_run(env: Env) -> None:
+    env.write_apps([])
+    assert env.shortlist().code == 0
+
+    assert _halt(env) == 0  # typed by hand, no `outreach start`
+
+    assert env.query("SELECT status FROM runs")[0]["status"] != "halted"
+
+
+def test_halt_needs_a_problem(env: Env) -> None:
+    with pytest.raises(SystemExit):
+        main(["halt", str(env.run_dir), "--db", str(env.db)])
+
+
+def test_prepare_with_no_emails_opens_no_page_and_ends_the_run(env: Env) -> None:
+    prepared_inputs(env, contacts=1)
+    env.write_revealed([])  # Jobright showed no address for anyone
+    env.write_emails([])
+    launcher = FakeLauncher()
+
+    def prepare_nothing() -> None:
+        argv = ["prepare", str(env.run_dir), "--dry-run", "--config", str(env.config), "--db", str(env.db),
+                "--now", NOW]
+        assert main(argv, launcher=launcher) == 0
+
+    launcher.claude_hook = prepare_nothing
+
+    assert _start(env, launcher) == 0
+
+    assert launcher.opened == []
+    assert launcher.notifications == []
+    assert launcher.ended_after_review == [True]
+
+
 def test_a_resumed_run_is_not_ended_because_an_earlier_review_was_done(env: Env) -> None:
     write_for_all(env, prepared_inputs(env, contacts=1))
     launcher = FakeLauncher()

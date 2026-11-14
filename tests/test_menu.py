@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import NOW, TODAY, Env, resume_config, write_resumes
+from conftest import NOW, TODAY, Env, make_app, resume_config, write_resumes
 from fake_gmail import FakeGmail
 from fakes import FakeLauncher
 from outreach.cli import main
@@ -269,6 +269,39 @@ def test_a_run_that_saved_an_empty_application_list_is_done(env: Env) -> None:
     m = menu(env)
 
     assert m.title.endswith("today: done, no applications to follow up")
+    assert m.default == QUIT
+
+
+def test_a_run_that_stopped_on_a_problem_says_what_to_fix_and_points_at_start(env: Env) -> None:
+    finish_setup(env)
+    with closing(Store(env.db)) as store, store.transaction():
+        run_id = store.get_or_create_run(env.run_dir, TODAY)
+        store.set_run_processes(run_id, os.getpid(), None, None)  # as during `outreach start`
+    assert main(["halt", str(env.run_dir), "--problem", "Signed out of Jobright: sign in to Jobright in Chrome",
+                 "--db", str(env.db)]) == 0
+    with closing(Store(env.db)) as store, store.transaction():
+        store.set_run_processes(run_id, None, None, None)  # as `outreach start` leaves it
+
+    m = menu(env)
+
+    assert m.title.endswith(
+        "today: stopped: Signed out of Jobright: sign in to Jobright in Chrome; Start picks up where it left off")
+    assert m.default == START
+
+
+def test_a_run_with_nothing_to_email_is_done(env: Env) -> None:
+    finish_setup(env)
+    env.write_apps([make_app("Acme", "Backend Engineer", 90)])
+    with closing(Store(env.db)) as store, store.transaction():
+        run_id = store.get_or_create_run(env.run_dir, TODAY)
+        store.set_run_processes(run_id, os.getpid(), None, None)
+        mark_reviewed(store, run_id, "no Outreach Emails to review")
+        store.set_run_processes(run_id, None, None, None)
+        store.set_status("runs", run_id, "ended", "review finished")
+
+    m = menu(env)
+
+    assert m.title.endswith("today: done, nothing to email today")
     assert m.default == QUIT
 
 
