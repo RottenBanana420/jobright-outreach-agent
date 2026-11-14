@@ -3,7 +3,9 @@ name = "outreach"
 version = "0.1.0"
 description = "Daily Jobright outreach Run: state, ranking and Gmail in Python (see docs/design.md)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "questionary>=2.1.1",
+]
 
 [project.scripts]
 outreach = "outreach.cli:main"
@@ -35,4 +37,13 @@ line-length = 120
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "TID251"]
+
+# Outside processes go through `outreach.run.Launcher`, so tests can swap in `FakeLauncher` (CODING_STANDARDS.md).
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"subprocess".msg = "start processes through outreach.run.Launcher so tests can inject FakeLauncher"
+
+[tool.ruff.lint.per-file-ignores]
+"src/outreach/run.py" = ["TID251"]  # SystemLauncher itself
+"src/outreach/lint.py" = ["TID251"]  # the humanizer check: a captured, side-effect-free script run
+"tests/test_system_launcher.py" = ["TID251"]  # makes real child processes for SystemLauncher to find

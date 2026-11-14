@@ -360,6 +360,11 @@ class Store:
     def is_bounced(self, address: str) -> bool:
         return self._con.execute("SELECT 1 FROM bounces WHERE address = ?", (address.lower(),)).fetchone() is not None
 
+    def bounces_recorded_since(self, at: str) -> int:
+        """How many bounced addresses were recorded at or after `at` (UTC ISO 8601)."""
+        row = self._con.execute("SELECT count(*) AS n FROM bounces WHERE recorded_at >= ?", (at,)).fetchone()
+        return int(row["n"])
+
     def bounced_people(self) -> set[str]:
         """LinkedIn keys of people whose known address has bounced."""
         rows = self._con.execute(
@@ -489,6 +494,12 @@ class Store:
 
     def runs_with_processes(self) -> list[sqlite3.Row]:
         return self._con.execute("SELECT * FROM runs WHERE owner_pid IS NOT NULL ORDER BY id").fetchall()
+
+    def run_reached(self, run_id: int, status: str) -> bool:
+        """Whether the Run was ever in `status` (from the audit events, so a later status does not hide it)."""
+        return self._con.execute(
+            "SELECT 1 FROM events WHERE entity = 'runs' AND entity_id = ? AND to_status = ? LIMIT 1", (run_id, status)
+        ).fetchone() is not None
 
     def run_has_emails(self, run_id: int) -> bool:
         return self._con.execute(

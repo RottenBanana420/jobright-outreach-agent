@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -232,6 +233,17 @@ def _save_token(path: Path, token: dict[str, Any]) -> None:
         raise
 
 
+def signed_in_at(token_path: Path) -> datetime | None:
+    """When `outreach gmail-auth` saved this token. None when the file is missing, unreadable or has no date
+    (tokens saved before the date was stored); such a token still works."""
+    try:
+        value = json.loads(token_path.read_text()).get("signed_in_at")
+        at = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+    return at.replace(tzinfo=UTC) if at is not None and at.tzinfo is None else at
+
+
 def authorize(config: Config, timeout: float = 300.0) -> str:
     """Sign in once in the browser and save the token. Returns the authorized Gmail address."""
     client_file = Path(config.gmail_credentials)
@@ -282,5 +294,6 @@ def authorize(config: Config, timeout: float = 300.0) -> str:
         "access_token": reply["access_token"], "refresh_token": reply["refresh_token"],
         "expires_at": time.time() + float(reply.get("expires_in", 3600)),
         "client_id": client["client_id"], "client_secret": client["client_secret"], "scope": SCOPE,
+        "signed_in_at": datetime.now(UTC).isoformat(timespec="seconds"),  # the menu counts the 7 days from it
     })
     return RealGmail(config).profile_address()

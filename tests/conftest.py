@@ -12,7 +12,7 @@ import pytest
 
 from fake_gmail import FakeGmail
 from outreach.cli import main
-from outreach.run import SystemLauncher
+from outreach.run import Launcher, SystemLauncher
 
 # 2026-11-13 02:00 UTC is still 2026-11-12 in America/Los_Angeles.
 NOW = "2026-11-12T12:00:00-08:00"
@@ -248,12 +248,24 @@ def write_for_all(env: Env, ids: dict[str, int], role: str = "Backend Engineer",
 
 @pytest.fixture(autouse=True)
 def no_real_launcher(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests inject `FakeLauncher`; the real caffeinate, Claude Code, osascript and `open` never run from a test."""
+    """Tests inject `FakeLauncher`; no `Launcher` method that starts a process runs for real from a test.
+
+    Every method of the `Launcher` protocol is guarded unless listed in `HARMLESS_LAUNCHER_METHODS`, so a new one
+    is guarded the day it is added."""
     if request.node.get_closest_marker("real_launcher"):
         return
 
     def refuse(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a test reached the real launcher; pass FakeLauncher() to main()")
 
-    for name in ("start_caffeinate", "run_claude", "notify", "open_url"):
-        monkeypatch.setattr(SystemLauncher, name, refuse)
+    for name in launcher_methods():
+        if name not in HARMLESS_LAUNCHER_METHODS:
+            monkeypatch.setattr(SystemLauncher, name, refuse)
+
+
+# Only look at or signal pids the test itself started (tests/test_system_launcher.py).
+HARMLESS_LAUNCHER_METHODS = {"terminate", "is_alive"}
+
+
+def launcher_methods() -> list[str]:
+    return [n for n, v in vars(Launcher).items() if not n.startswith("_") and callable(v)]

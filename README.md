@@ -60,9 +60,27 @@ scripts/setup-wizard.sh
 
 The wizard walks you through the steps only you can do: a Google Cloud project with the Gmail API, an OAuth client saved as `credentials.json`, `outreach.toml` with your Gmail address, the Gmail sign-in (`uv run outreach gmail-auth`), and the browser sign-ins Claude needs. Put your resume PDFs in `resumes/` (gitignored) under the names in [outreach.example.toml](outreach.example.toml).
 
-While the Google consent screen is in "Testing", the Gmail sign-in expires every 7 days. Run `uv run outreach gmail-auth` again when it does.
+While the Google consent screen is in "Testing", the Gmail sign-in expires every 7 days. The menu counts the days and points at "Renew Gmail sign-in" from day 6 (or run `uv run outreach gmail-auth`).
 
 ## Usage
+
+The quickest way in is the menu. In a terminal, from the project folder, run `./outreach` (or `uv run outreach`) with no command:
+
+```
+? Outreach · Fri 13 Nov · today: waiting for your review: 6 emails (↑↓ or number, Enter; q quits)
+  Gmail: signed in, day 3 of 7
+   1) Start today's Run
+   2) Practice run (nothing is sent)
+ » 3) Reopen the review page
+     ─────
+   4) Renew Gmail sign-in
+   5) Show settings
+   6) Quit
+```
+
+The pointer starts on the likely next step, so on a normal day one Enter starts the Run. Pick anything else with its number or the arrow keys, then Enter; `q` quits. Items that don't apply today are hidden. After the action finishes (a whole Run included), the menu comes back with the new status. [docs/run-files.md](docs/run-files.md#the-menu-outreach-with-no-command) lists every item and when it shows.
+
+Every command still works on its own:
 
 ```sh
 uv run outreach start              # today's Run
@@ -98,9 +116,9 @@ Working end to end. The full Run, from `outreach start` to labelled sent emails,
 | 5. Email writing, linting and resume choice | Done |
 | 6. Gmail drafts and controlled sending | Done |
 | 7. Review page and Approval | Done |
-| 8. Testing | 295 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
+| 8. Testing | 318 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
 
-Next up: an arrow-key menu for the CLI ([#22](https://github.com/RottenBanana420/jobright-outreach-agent/issues/22)) and whether publishing the Google app ends the 7-day sign-in ([#23](https://github.com/RottenBanana420/jobright-outreach-agent/issues/23)).
+Next up: whether publishing the Google app ends the 7-day sign-in ([#23](https://github.com/RottenBanana420/jobright-outreach-agent/issues/23)).
 
 ## Development
 
@@ -108,7 +126,7 @@ Next up: an arrow-key menu for the CLI ([#22](https://github.com/RottenBanana420
 uv run ruff check . && uv run mypy src tests && uv run pytest -q
 ```
 
-CI runs the same sequence ([ci.yml](.github/workflows/ci.yml)). The code uses only the Python standard library at runtime. Contributor rules are in [CODING_STANDARDS.md](CODING_STANDARDS.md) and the project's vocabulary in [GLOSSARY.md](GLOSSARY.md).
+CI runs the same sequence ([ci.yml](.github/workflows/ci.yml)). At runtime the code uses the Python standard library plus [Questionary](https://github.com/tmbo/questionary) for the menu. Contributor rules are in [CODING_STANDARDS.md](CODING_STANDARDS.md) and the project's vocabulary in [GLOSSARY.md](GLOSSARY.md).
 
 ## Docs
 

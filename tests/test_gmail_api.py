@@ -5,9 +5,13 @@ import json
 import os
 import stat
 import time
+import urllib.parse
+import urllib.request
+import webbrowser
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -149,3 +153,35 @@ def test_the_token_file_is_private_from_the_first_byte(tmp_path: Path) -> None:
         os.umask(old_umask)
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_gmail_auth_saves_when_the_user_signed_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer = '{"access_token": "a", "refresh_token": "r", "expires_in": 3600, "emailAddress": "me@example.test"}'
+    with server(200, answer) as url:
+        client = tmp_path / "credentials.json"
+        client.write_text(json.dumps({"installed": {"client_id": "c", "client_secret": "s", "token_uri": url}}))
+        config = replace(Config(), gmail_credentials=str(client), gmail_token=str(tmp_path / "token.json"))
+        monkeypatch.setattr(gmail_api, "API", url)
+
+        def browser_signs_in(auth_url: str) -> bool:
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(auth_url).query)
+            back = f"{query['redirect_uri'][0]}/?code=x&state={query['state'][0]}"
+            Thread(target=lambda: urllib.request.urlopen(back, timeout=5).read(), daemon=True).start()
+            return True
+
+        monkeypatch.setattr(webbrowser, "open", browser_signs_in)
+        before = datetime.now(UTC).replace(microsecond=0)
+
+        assert gmail_api.authorize(config, timeout=5) == "me@example.test"
+
+    at = gmail_api.signed_in_at(Path(config.gmail_token))
+    assert at is not None and before <= at <= datetime.now(UTC)
+
+
+def test_a_token_saved_before_sign_in_dates_were_kept_has_no_date_and_still_works(
+    real: gmail_api.RealGmail, tmp_path: Path,
+) -> None:
+    write_token(tmp_path / "token.json", access_token="fresh", expires_at=time.time() + 3600)
+
+    assert gmail_api.signed_in_at(tmp_path / "token.json") is None
+    assert real._access_token() == "fresh"
