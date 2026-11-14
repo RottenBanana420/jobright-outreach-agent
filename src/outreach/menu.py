@@ -9,6 +9,7 @@ User-facing text says "undelivered", never "bounced"; the code keeps `bounce`.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
@@ -71,6 +72,14 @@ def missing_setup(config: Config, config_file: Path) -> list[str]:
     return missing
 
 
+def _no_applications(run_dir: Path) -> bool:
+    """Today's Run read the Applied list and saved it empty: there is nothing to follow up."""
+    try:
+        return bool(json.loads((run_dir / "applications.json").read_text())["applications"] == [])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def _signed_in(config: Config) -> bool:
     return Path(config.gmail_token).exists()
 
@@ -107,7 +116,8 @@ def build_menu(
     run_dir = data_dir / now.date().isoformat()
     live = interrupted = waiting = sent = undelivered = 0
     dry_run = False
-    run_found = has_emails = False
+    run_found = has_emails = reviewed = False
+    problem = ""
     if db_path.exists():
         with closing(Store(db_path)) as store:
             live = sum(1 for r in store.runs_with_processes() if is_alive(r["owner_pid"]))
@@ -121,19 +131,29 @@ def build_menu(
                 interrupted = len(store.unfinished_emails(run["id"]))
                 # A practice run's confirmed emails stay `approved` (nothing is marked to send), so once its review
                 # page has closed during the Run, nothing is waiting any more.
-                closed = dry_run and store.run_reached(run["id"], "reviewed")
+                reviewed = store.run_reached(run["id"], "reviewed")
+                if run["status"] == "halted":
+                    problem = store.last_note(run["id"], "halted")
+                closed = dry_run and reviewed
                 waiting = 0 if closed else sum(1 for e in emails if e["status"] in ("written", "approved"))
                 sent = sum(1 for e in emails if e["status"] == "sent")
                 has_emails = bool(emails)
+    nothing_today = run_found and not has_emails and (reviewed or _no_applications(run_dir))
 
     if live:
         status = "a Run is in progress in another window"
     elif not run_found:
         status = "no Run yet"
+    elif problem:
+        status = f"stopped: {problem}; Start picks up where it left off"
     elif interrupted:
         status = f"send interrupted: {_emails(interrupted)} to finish"
     elif waiting:
         status = f"waiting for your review: {_emails(waiting)}" + (" (practice run)" if dry_run else "")
+    elif nothing_today and _no_applications(run_dir):
+        status = "done, no applications to follow up"
+    elif nothing_today:
+        status = "done, nothing to email today"  # no Contacts, or no address revealed
     elif not has_emails:
         status = "started, not finished; Start picks up where it left off"
     elif sent:
@@ -176,11 +196,13 @@ def build_menu(
         default = QUIT  # Start would be refused, and one Enter must not stop a Run in another window
     elif gmail_day is not None and gmail_day >= RENEW_FROM_DAY:
         default = GMAIL
+    elif problem:
+        default = START  # once the problem is fixed, Start resumes
     elif interrupted:
         default = SEND
     elif waiting:
         default = REVIEW
-    elif not run_found or not has_emails:
+    elif not run_found or (not has_emails and not nothing_today):
         default = START
     else:
         default = QUIT  # today's Run is done

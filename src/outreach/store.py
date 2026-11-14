@@ -501,6 +501,15 @@ class Store:
             "SELECT 1 FROM events WHERE entity = 'runs' AND entity_id = ? AND to_status = ? LIMIT 1", (run_id, status)
         ).fetchone() is not None
 
+    def last_note(self, run_id: int, status: str) -> str:
+        """The note of the Run's latest change to `status` (for `halted`, the problem), or "" if it never had it."""
+        row = self._con.execute(
+            "SELECT note FROM events WHERE entity = 'runs' AND entity_id = ? AND to_status = ?"
+            " ORDER BY id DESC LIMIT 1",
+            (run_id, status),
+        ).fetchone()
+        return str(row["note"]) if row is not None else ""
+
     def run_has_emails(self, run_id: int) -> bool:
         return self._con.execute(
             "SELECT 1 FROM outreach_emails WHERE run_id = ? LIMIT 1", (run_id,)

@@ -19,7 +19,7 @@ from outreach.errors import UserError
 from outreach.gmail import Gmail
 from outreach.menu import SETUP, Ask, Item, Menu, build_menu, menu_loop
 from outreach.resume import resume_path, variant_for
-from outreach.run import Launcher, SystemLauncher, mark_reviewed, start_run, stop_run
+from outreach.run import Launcher, SystemLauncher, halt_run, mark_reviewed, start_run, stop_run
 from outreach.schema import (
     load_applications,
     load_bounces,
@@ -80,6 +80,11 @@ def main(
     send_cmd.add_argument("run_dir", type=Path)
     send_cmd.add_argument("--config", type=Path)
     send_cmd.add_argument("--db", type=Path)
+    halt_cmd = sub.add_parser("halt", help="end the Run in progress on a problem Claude cannot fix, saying what to fix")
+    halt_cmd.add_argument("run_dir", type=Path)
+    halt_cmd.add_argument("--problem", required=True, help="what went wrong and what the user should fix")
+    halt_cmd.add_argument("--db", type=Path)
+
     auth_cmd = sub.add_parser("gmail-auth", help="sign in to Gmail once in the browser (saves a token)")
     auth_cmd.add_argument("--config", type=Path)
     config_cmd = sub.add_parser("config", help="print the effective settings")
@@ -109,6 +114,8 @@ def main(
             return _prepare(args, launcher or SystemLauncher(), gmail)
         if args.command == "send":
             return _send(args, gmail)
+        if args.command == "halt":
+            return _halt(args)
         if args.command == "review":
             return _review(args, launcher or SystemLauncher(), gmail)
         return _shortlist(args)
@@ -179,6 +186,8 @@ def _shortlist(args: argparse.Namespace) -> int:
     with closing(Store(args.db or DEFAULT_DB)) as store, store.transaction():
         run_id = store.get_or_create_run(args.run_dir, today)
         store.record_shortlist(run_id, groups)
+        if not shortlisted:
+            mark_reviewed(store, run_id, "no Today's Applications: nothing to review")
     out = {"run_date": today, "total_groups": len(groups), "groups": shortlisted}
     (args.run_dir / "shortlist.json").write_text(json.dumps(out, indent=2))
     return 0
@@ -278,6 +287,11 @@ def _prepare(args: argparse.Namespace, launcher: Launcher, gmail: Gmail | None) 
         print(f"not prepared: {line}")
     if done.humanizer_skipped:
         print("work-humanizer check skipped (humanizer_check is not set or not available)")
+    if not done.emails:
+        print("nothing to review: no Outreach Emails were prepared, so no review page opens")
+        with closing(Store(db_path)) as store, store.transaction():
+            mark_reviewed(store, run_id, "no Outreach Emails to review")
+        return 0
     if not args.dry_run:
         gmail = gmail or _real_gmail(config)
         with closing(Store(db_path)) as store:
@@ -319,6 +333,16 @@ def _serve_review(
     with closing(Store(db_path)) as store, store.transaction():
         mark_reviewed(store, run_id)
     return code
+
+
+def _halt(args: argparse.Namespace) -> int:
+    with closing(Store(args.db or DEFAULT_DB)) as store, store.transaction():
+        run_id = int(_require_run(store, args.run_dir)["id"])
+        if halt_run(store, run_id, args.problem.strip()):
+            print("the Run is ending; `outreach start` closes this session in about 30 seconds")
+        else:
+            print("no live Run for this folder; nothing marked")
+    return 0
 
 
 def _send(args: argparse.Namespace, gmail: Gmail | None) -> int:
