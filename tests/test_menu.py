@@ -132,6 +132,16 @@ def test_a_token_without_a_sign_in_date_shows_signed_in_without_a_countdown(env:
     assert m.default == START
 
 
+def test_once_the_google_app_is_in_production_the_sign_in_has_no_countdown(env: Env) -> None:
+    finish_setup(env, signed_in="2026-11-01T17:00:00+00:00")
+    env.write_config('gmail_publishing_status = "production"\n' + env.config.read_text())
+
+    m = menu(env)
+
+    assert m.notes == ("Gmail: signed in",)
+    assert m.default == START
+
+
 def test_incomplete_setup_shows_finish_setup_with_what_is_missing_and_points_at_it(env: Env) -> None:
     write_resumes(env.root / "resumes", skip=("ml",))
     env.write_config(f'gmail_credentials = "{env.root / "none.json"}"\ngmail_token = "{env.root / "none2.json"}"\n'

@@ -76,7 +76,9 @@ def _signed_in(config: Config) -> bool:
 
 
 def _gmail_day(config: Config, today: datetime) -> int | None:
-    """Which day of the 7-day sign-in today is (1 = the day of the sign-in), or None when it is not known."""
+    """Which day of the 7-day sign-in today is (1 = the day of the sign-in), or None when there is no countdown."""
+    if config.gmail_publishing_status == "production":
+        return None  # the sign-in doesn't expire, so there is nothing to count
     at = signed_in_at(Path(config.gmail_token))
     if at is None:
         return None

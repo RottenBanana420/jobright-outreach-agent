@@ -22,6 +22,9 @@ DEFAULT_RESUME_FILES = {
 }
 
 
+PUBLISHING_STATUSES = ("testing", "production")
+
+
 @dataclass(frozen=True)
 class Config:
     contacts_per_company: int = 4
@@ -35,6 +38,8 @@ class Config:
     humanizer_check: str = ""  # optional path to the work-humanizer check script; empty means skip
     gmail_credentials: str = "credentials.json"  # the Google Cloud OAuth client (Desktop app); gitignored
     gmail_token: str = "data/gmail_token.json"  # written by `outreach gmail-auth`; gitignored
+    # The Google OAuth app's publishing status: "testing" (sign-ins last 7 days) or "production" (no expiry).
+    gmail_publishing_status: str = "testing"
     test_recipient: str = ""  # live-test mode: every email goes to a plus-address of this one address; empty = off
     resume_files: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_RESUME_FILES))
 
@@ -91,6 +96,8 @@ def _check(name: str, value: Any, file: str) -> Any:
             raise bad("must be a string")
         if name in ("timezone", "model") and not value.strip():
             raise bad("must not be empty")
+        if name == "gmail_publishing_status" and value not in PUBLISHING_STATUSES:
+            raise bad(f"must be one of {', '.join(PUBLISHING_STATUSES)}")
         if name == "test_recipient" and value and not _is_plain_address(value):
             raise bad("must be one plain address like you@gmail.com (no '+', spaces or commas)")
         if name == "timezone":

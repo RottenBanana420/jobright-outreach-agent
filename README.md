@@ -60,7 +60,7 @@ scripts/setup-wizard.sh
 
 The wizard walks you through the steps only you can do: a Google Cloud project with the Gmail API, an OAuth client saved as `credentials.json`, `outreach.toml` with your Gmail address, the Gmail sign-in (`uv run outreach gmail-auth`), and the browser sign-ins Claude needs. Put your resume PDFs in `resumes/` (gitignored) under the names in [outreach.example.toml](outreach.example.toml).
 
-While the Google consent screen is in "Testing", the Gmail sign-in expires every 7 days. The menu counts the days and points at "Renew Gmail sign-in" from day 6 (or run `uv run outreach gmail-auth`).
+While the Google consent screen is in "Testing", the Gmail sign-in expires every 7 days. The menu counts the days and points at "Renew Gmail sign-in" from day 6 (or run `uv run outreach gmail-auth`). To end the weekly sign-in, publish the Google app with `scripts/gmail-production-wizard.sh` ([why and how](docs/research/gmail-oauth-production-status.md)); it sets `gmail_publishing_status = "production"` so the menu stops counting.
 
 ## Usage
 
@@ -116,9 +116,9 @@ Working end to end. The full Run, from `outreach start` to labelled sent emails,
 | 5. Email writing, linting and resume choice | Done |
 | 6. Gmail drafts and controlled sending | Done |
 | 7. Review page and Approval | Done |
-| 8. Testing | 318 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
+| 8. Testing | 320 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
 
-Next up: whether publishing the Google app ends the 7-day sign-in ([#23](https://github.com/RottenBanana420/jobright-outreach-agent/issues/23)).
+Next up: packaging the agent so others can install it ([#26](https://github.com/RottenBanana420/jobright-outreach-agent/issues/26)).
 
 ## Development
 

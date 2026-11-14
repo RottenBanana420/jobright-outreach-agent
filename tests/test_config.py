@@ -56,6 +56,7 @@ def test_settings_in_the_file_override_defaults(env: Env) -> None:
         ('test_recipient = "me"\n', "test_recipient"),
         ('test_recipient = "me+x@gmail.test"\n', "test_recipient"),  # the plus part is added by the program
         ('test_recipient = "me@gmail.test, you@gmail.test"\n', "test_recipient"),
+        ('gmail_publishing_status = "published"\n', "gmail_publishing_status"),
         ("contacts_per_company = [\n", "outreach.toml"),  # malformed TOML
     ],
 )

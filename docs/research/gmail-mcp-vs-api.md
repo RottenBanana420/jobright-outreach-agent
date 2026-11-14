@@ -34,8 +34,8 @@ The Gmail API reads the PDF from disk in Python: zero model tokens, byte-exact.
 | Who can call it | Only Claude, in a session | Python, so the send step is deterministic code |
 | Duplicate-send protection | Depends on the model following instructions | Code checks SQLite before each send |
 | Message IDs for the audit log | Returned to Claude, which must record them | Returned to Python, written directly |
-| Re-authorization | Handled by claude.ai | In "Testing" status Google expires the refresh token every 7 days (one consent click a week). Switching the app to "In production" without verification avoids that, at the cost of an "unverified app" warning on the consent screen; unverified apps are capped at 100 users. |
-| Scopes | Whatever claude.ai was granted | `gmail.compose` (drafts and send), which Google classifies as Restricted |
+| Re-authorization | Handled by claude.ai | In "Testing" status Google expires the refresh token every 7 days (one consent click a week). Publishing the app to "In production" without verification ends that for personal use, at the cost of a click-through "unverified app" warning and a 100-user cap. Sourced details and console steps: [gmail-oauth-production-status.md](gmail-oauth-production-status.md). |
+| Scopes | Whatever claude.ai was granted | `gmail.modify` (drafts, send, search Sent, labels), which Google classifies as Restricted. The first plan was `gmail.compose`, also Restricted, but it cannot list or label messages. |
 | Quotas | Not documented | 6,000 units/min/user. Draft create 10 units, send 100. |
 | Daily send limit | Gmail account limit, ~500 recipients/day (third-party sources) | Same |
 

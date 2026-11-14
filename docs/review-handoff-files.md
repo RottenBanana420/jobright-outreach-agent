@@ -67,7 +67,7 @@ The Gmail adapter (`outreach.gmail.Gmail`) is the only external seam: `create_dr
 
 ### Setup (once)
 
-1. In Google Cloud, create a project, enable the Gmail API, configure the OAuth consent screen, and create an OAuth client of type **Desktop app**. Save its JSON as `credentials.json` (gitignored) or point `gmail_credentials` at it. While the consent screen is in "Testing" Google expires the refresh token every 7 days; `outreach gmail-auth` then needs repeating.
+1. In Google Cloud, create a project, enable the Gmail API, configure the OAuth consent screen, and create an OAuth client of type **Desktop app**. Save its JSON as `credentials.json` (gitignored) or point `gmail_credentials` at it. While the consent screen is in "Testing" Google expires the refresh token every 7 days; `outreach gmail-auth` then needs repeating. Publishing the app ends that: see `scripts/gmail-production-wizard.sh`, then set `gmail_publishing_status = "production"`.
 2. Set `sender` in `outreach.toml` to the Gmail address.
 3. `outreach gmail-auth` opens the browser, saves the token to `gmail_token` (default `data/gmail_token.json`, gitignored, mode 600) and prints the authorized address.
 
