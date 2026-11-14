@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime
@@ -22,6 +23,9 @@ from outreach.errors import UserError
 from outreach.store import Store
 
 COMMAND_FILE = Path(".claude/commands/outreach-run.md")
+# Once the review is finished, Claude Code gets this long to print its final report before `start` ends it.
+REPORT_GRACE_SECONDS = 30.0
+POLL_SECONDS = 2.0
 # Files Claude writes into the Run folder, in order. A resumed Run skips the steps whose file already exists.
 STEP_FILES = (
     "bounces", "applications", "shortlist", "contact_candidates", "picked_contacts",
@@ -31,14 +35,17 @@ STEP_FILES = (
 
 class Launcher(Protocol):
     def start_caffeinate(self) -> int: ...
-    def run_claude(self, prompt: str, model: str, on_started: Callable[[int], None]) -> int: ...
+    def run_claude(
+        self, prompt: str, model: str, on_started: Callable[[int], None], finished: Callable[[], bool],
+    ) -> int: ...
     def terminate(self, pid: int) -> None: ...
     def is_alive(self, pid: int) -> bool: ...
     def notify(self, title: str, message: str) -> None: ...
+    def open_url(self, url: str) -> None: ...
 
 
 class SystemLauncher:
-    """The real thing: `caffeinate`, `claude` and `osascript` on this Mac."""
+    """The real thing: `caffeinate`, `claude`, `osascript` and `open` on this Mac."""
 
     def start_caffeinate(self) -> int:
         # -w ties it to this process, so it also exits if `outreach start` dies without cleaning up.
@@ -48,7 +55,10 @@ class SystemLauncher:
         )
         return proc.pid
 
-    def run_claude(self, prompt: str, model: str, on_started: Callable[[int], None]) -> int:
+    def run_claude(
+        self, prompt: str, model: str, on_started: Callable[[int], None], finished: Callable[[], bool],
+    ) -> int:
+        """Run Claude Code until it exits. Once `finished()` turns true, end it after `REPORT_GRACE_SECONDS`."""
         if not COMMAND_FILE.exists():
             raise UserError(f"{COMMAND_FILE}: not found; run `outreach start` from the project folder")
         try:
@@ -56,11 +66,22 @@ class SystemLauncher:
         except FileNotFoundError:
             raise UserError("claude: command not found; install Claude Code and make sure it is on PATH") from None
         on_started(proc.pid)
+        deadline: float | None = None
         while True:
             try:
-                return proc.wait()
+                return proc.wait(timeout=POLL_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
             except KeyboardInterrupt:
                 continue  # Ctrl-C goes to Claude Code as well; it decides when to exit
+            if deadline is None:
+                if finished():
+                    deadline = time.monotonic() + REPORT_GRACE_SECONDS
+            elif time.monotonic() >= deadline:
+                self.terminate(proc.pid)
+                code = proc.wait()
+                _reset_terminal()
+                return code
 
     def terminate(self, pid: int) -> None:
         for target in reversed([pid, *_descendants(pid)]):
@@ -88,6 +109,18 @@ class SystemLauncher:
             )
         except OSError:
             pass  # a missing osascript (not a Mac) must not stop the review page from coming up
+
+    def open_url(self, url: str) -> None:
+        try:
+            subprocess.run(["open", url], stdin=subprocess.DEVNULL, capture_output=True, check=False)
+        except OSError:
+            pass  # no `open` (not a Mac): the URL is still printed and in the notification
+
+
+def _reset_terminal() -> None:
+    """Claude Code ended by a signal can leave the terminal in raw mode; put it back. Best effort."""
+    if sys.stdin.isatty():
+        subprocess.run(["stty", "sane"], check=False)
 
 
 def _descendants(pid: int) -> list[int]:
@@ -134,23 +167,35 @@ def start_run(
         # Run was not stopped meanwhile, and a process that could not be recorded is ended on the spot.
         if _remember(db_path, run_id, caffeinate=caffeinate):
             code = launcher.run_claude(
-                f"/outreach-run {run_dir}", config.model, lambda pid: _remember_claude(db_path, run_id, launcher, pid)
+                f"/outreach-run {run_dir}", config.model, lambda pid: _remember_claude(db_path, run_id, launcher, pid),
+                lambda: _status(db_path, run_id) == "reviewed",
             )
     finally:
         launcher.terminate(caffeinate)
         with closing(Store(db_path)) as store, store.transaction():
             store.set_run_processes(run_id, None, None, None)
-            if store.get_run(run_id)["status"] != "stopped":
+            status = store.get_run(run_id)["status"]
+            if status == "reviewed":
+                code = 0  # `start` ended Claude Code itself because the review was done
+                store.set_status("runs", run_id, "ended", "review finished; Claude Code ended by outreach start")
+            elif status != "stopped":
                 store.set_status("runs", run_id, "ended" if code == 0 else "failed", f"Claude Code exited with {code}")
-    if code != 0 and not _is_stopped(db_path, run_id):
+    if code != 0 and _status(db_path, run_id) != "stopped":
         print(f"outreach: Claude Code exited with code {code}; run `outreach start` again to resume", file=sys.stderr)
         return 1
     return 0
 
 
-def _is_stopped(db_path: Path, run_id: int) -> bool:
+def _status(db_path: Path, run_id: int) -> str:
     with closing(Store(db_path)) as store:
-        return bool(store.get_run(run_id)["status"] == "stopped")
+        return str(store.get_run(run_id)["status"])
+
+
+def mark_reviewed(store: Store, run_id: int) -> None:
+    """The review page closed and what was confirmed is sent: a live Run can end (see `start_run`)."""
+    run = store.get_run(run_id)
+    if run["owner_pid"] is not None and run["status"] not in ("stopped", "reviewed"):
+        store.set_status("runs", run_id, "reviewed", "review page closed")
 
 
 def _remember(db_path: Path, run_id: int, *, caffeinate: int | None = None, claude: int | None = None) -> bool:

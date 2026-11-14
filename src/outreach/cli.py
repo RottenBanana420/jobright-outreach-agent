@@ -17,7 +17,7 @@ from outreach.emails import prepare_emails
 from outreach.errors import UserError
 from outreach.gmail import Gmail
 from outreach.resume import resume_path, variant_for
-from outreach.run import Launcher, SystemLauncher, start_run, stop_run
+from outreach.run import Launcher, SystemLauncher, mark_reviewed, start_run, stop_run
 from outreach.schema import (
     load_applications,
     load_bounces,
@@ -276,11 +276,15 @@ def _serve_review(
     if not dry_run:
         gmail = gmail or _real_gmail(config)  # edits on the page update the Gmail drafts
 
-    def notify(url: str) -> None:
+    def ready(url: str) -> None:
+        launcher.open_url(url)
         launcher.notify("Outreach review ready", f"{waiting} email(s) to review at {url}")
 
-    confirmed = serve(db_path, config, run_id, port=port, gmail=gmail, on_ready=notify)
-    return _send_confirmed(db_path, config, run_id, gmail) if confirmed and not dry_run else 0
+    confirmed = serve(db_path, config, run_id, port=port, gmail=gmail, on_ready=ready)
+    code = _send_confirmed(db_path, config, run_id, gmail) if confirmed and not dry_run else 0
+    with closing(Store(db_path)) as store, store.transaction():
+        mark_reviewed(store, run_id)
+    return code
 
 
 def _send(args: argparse.Namespace, gmail: Gmail | None) -> int:

@@ -8,7 +8,7 @@ Settled during the design interview on 2026-11-12. Terms in bold are defined in 
 - `outreach stop` cancels a **Run** early. Otherwise the **Run** ends by itself once approved emails are sent, and `caffeinate` exits with it.
 - The user starts every Run by hand. No cron, no schedule, no always-on agent. One pass per start.
 - Claude runs in visible mode: a terminal window shows its work and the user can step in. Headless mode was tested in Milestone 2 and works, but is not used.
-- The only pause is email review. A Mac notification says when the review page is ready.
+- The only pause is email review. The review page opens in the browser when it is ready, with a Mac notification.
 
 ## Selecting applications
 
