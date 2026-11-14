@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import NOW, Env, resume_config, write_resumes
+from conftest import NOW, TODAY, Env, resume_config, write_resumes
 from fake_gmail import FakeGmail
 from fakes import FakeLauncher
 from outreach.cli import main
@@ -240,6 +240,23 @@ def test_enter_takes_the_highlighted_item_a_number_picks_another_and_q_quits(
     finish_setup(env)
 
     assert answer_with(keys, menu(env)) == chosen
+
+
+def test_a_run_that_found_no_applications_today_is_done(env: Env) -> None:
+    finish_setup(env)
+    env.write_apps([])
+    with closing(Store(env.db)) as store, store.transaction():
+        run_id = store.get_or_create_run(env.run_dir, TODAY)
+        store.set_run_processes(run_id, os.getpid(), None, None)  # as during `outreach start`
+    assert env.shortlist().code == 0
+    with closing(Store(env.db)) as store, store.transaction():
+        store.set_run_processes(run_id, None, None, None)
+        store.set_status("runs", run_id, "ended", "review finished")
+
+    m = menu(env)
+
+    assert m.title.endswith("today: done, no applications to follow up")
+    assert m.default == QUIT
 
 
 def test_a_practice_run_whose_review_page_closed_is_done_not_waiting(env: Env) -> None:

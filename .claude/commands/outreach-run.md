@@ -58,11 +58,11 @@ Skip if `applications.json` exists.
 7. Write `RUN_DIR/applications.json` as `{"run_date": "...", "applications": [ ... ]}` where each application has: `jobright_id`, `jobright_url`, `company`, `title`, `applied_on`, `status`, `agent_applied` (bool), `job_closed` (bool), `match_score` (int 0-100, or null when closed), `hidden_score` (int or omitted), and the job fields above (`responsibilities`, `required`, `preferred`, `core_skills` as lists of strings; the rest as strings or null). Write the file once, after the scroll is complete.
 8. Log, in your final report, anything the spec lists as not yet verified: whether today's cards needed more than one screen, and any card whose date looked inconsistent with `run_date`. Report it; do not guess.
 
-If there are no cards dated `run_date`, write the file with an empty list, tell the user there is nothing to follow up today, and end the Run (skip to the final report).
+If there are no cards dated `run_date`, write the file with an empty list and still run step 3. `shortlist` finds nothing and marks the Run done, and `outreach start` ends this session about 30 seconds later, so give a short final report right away: nothing to follow up today, and (if you saw it) the newest card's date.
 
 ### 3. Shortlist
 
-Run `uv run outreach shortlist RUN_DIR [--config X] [--db X] [--now X]`. Read `RUN_DIR/shortlist.json`: at most 10 Company Groups, each with its `company`, `roles` (every role title in the group), `rank` and `applications`. There is no approval pause here. If it finds no Today's Applications, report that and end.
+Run `uv run outreach shortlist RUN_DIR [--config X] [--db X] [--now X]`. Read `RUN_DIR/shortlist.json`: at most 10 Company Groups, each with its `company`, `roles` (every role title in the group), `rank` and `applications`. There is no approval pause here. If it finds no Today's Applications (`groups` is empty), give a short final report right away and stop: `outreach start` ends this session about 30 seconds later. No review page opens, because there is nothing to review.
 
 ### 4. Contact candidates
 

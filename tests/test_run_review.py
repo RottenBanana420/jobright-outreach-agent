@@ -98,6 +98,30 @@ def test_a_run_ends_by_itself_once_the_review_is_done(env: Env) -> None:
     assert statuses[-2:] == ["reviewed", "ended"]
 
 
+def test_a_run_with_no_applications_today_ends_by_itself(env: Env) -> None:
+    launcher = FakeLauncher()
+
+    def nothing_today() -> None:  # what Claude does when no Applied card is dated today
+        env.write_apps([])
+        assert env.shortlist().code == 0
+
+    launcher.claude_hook = nothing_today
+
+    assert _start(env, launcher) == 0
+
+    assert launcher.ended_after_review == [True]
+    statuses = [e["to_status"] for e in env.query("SELECT to_status FROM events WHERE entity = 'runs' ORDER BY id")]
+    assert statuses[-2:] == ["reviewed", "ended"]
+
+
+def test_a_shortlist_outside_a_live_run_does_not_mark_the_run(env: Env) -> None:
+    env.write_apps([])
+
+    assert env.shortlist().code == 0  # typed by hand, no `outreach start`
+
+    assert env.query("SELECT status FROM runs")[0]["status"] != "reviewed"
+
+
 def test_a_resumed_run_is_not_ended_because_an_earlier_review_was_done(env: Env) -> None:
     write_for_all(env, prepared_inputs(env, contacts=1))
     launcher = FakeLauncher()

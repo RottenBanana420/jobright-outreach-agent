@@ -179,6 +179,8 @@ def _shortlist(args: argparse.Namespace) -> int:
     with closing(Store(args.db or DEFAULT_DB)) as store, store.transaction():
         run_id = store.get_or_create_run(args.run_dir, today)
         store.record_shortlist(run_id, groups)
+        if not shortlisted:
+            mark_reviewed(store, run_id, "no Today's Applications: nothing to review")
     out = {"run_date": today, "total_groups": len(groups), "groups": shortlisted}
     (args.run_dir / "shortlist.json").write_text(json.dumps(out, indent=2))
     return 0

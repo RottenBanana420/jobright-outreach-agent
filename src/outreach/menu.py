@@ -107,7 +107,7 @@ def build_menu(
     run_dir = data_dir / now.date().isoformat()
     live = interrupted = waiting = sent = undelivered = 0
     dry_run = False
-    run_found = has_emails = False
+    run_found = has_emails = reviewed = False
     if db_path.exists():
         with closing(Store(db_path)) as store:
             live = sum(1 for r in store.runs_with_processes() if is_alive(r["owner_pid"]))
@@ -121,7 +121,8 @@ def build_menu(
                 interrupted = len(store.unfinished_emails(run["id"]))
                 # A practice run's confirmed emails stay `approved` (nothing is marked to send), so once its review
                 # page has closed during the Run, nothing is waiting any more.
-                closed = dry_run and store.run_reached(run["id"], "reviewed")
+                reviewed = store.run_reached(run["id"], "reviewed")
+                closed = dry_run and reviewed
                 waiting = 0 if closed else sum(1 for e in emails if e["status"] in ("written", "approved"))
                 sent = sum(1 for e in emails if e["status"] == "sent")
                 has_emails = bool(emails)
@@ -134,6 +135,8 @@ def build_menu(
         status = f"send interrupted: {_emails(interrupted)} to finish"
     elif waiting:
         status = f"waiting for your review: {_emails(waiting)}" + (" (practice run)" if dry_run else "")
+    elif not has_emails and reviewed:
+        status = "done, no applications to follow up"  # `shortlist` found nothing, so the Run ended
     elif not has_emails:
         status = "started, not finished; Start picks up where it left off"
     elif sent:
@@ -180,7 +183,7 @@ def build_menu(
         default = SEND
     elif waiting:
         default = REVIEW
-    elif not run_found or not has_emails:
+    elif not run_found or (not has_emails and not reviewed):
         default = START
     else:
         default = QUIT  # today's Run is done

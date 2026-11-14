@@ -198,11 +198,12 @@ def _status(db_path: Path, run_id: int) -> str:
         return str(store.get_run(run_id)["status"])
 
 
-def mark_reviewed(store: Store, run_id: int) -> None:
-    """The review page closed and what was confirmed is sent: a live Run can end (see `start_run`)."""
+def mark_reviewed(store: Store, run_id: int, note: str = "review page closed") -> None:
+    """The review page closed and what was confirmed is sent, or there was nothing to review: a live Run can end
+    (see `start_run`)."""
     run = store.get_run(run_id)
     if run["owner_pid"] is not None and run["status"] not in ("stopped", "reviewed"):
-        store.set_status("runs", run_id, "reviewed", "review page closed")
+        store.set_status("runs", run_id, "reviewed", note)
 
 
 def _remember(db_path: Path, run_id: int, *, caffeinate: int | None = None, claude: int | None = None) -> bool:

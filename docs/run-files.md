@@ -13,7 +13,7 @@ Typed by hand in a terminal, from the project folder. There is no schedule and n
 5. when Claude Code exits, ends `caffeinate` and marks the Run `ended` (exit code 0) or `failed` (any other code; `outreach start` exits 1 and says to run it again).
 6. while Claude Code runs, checks every 2 seconds whether the Run is `reviewed` (below). Once it is, Claude Code gets 30 seconds to print its final report, then `start` ends it and its child processes and marks the Run `ended`, whatever the exit code.
 
-`prepare` and `review` mark the Run `reviewed` when the review page has closed (confirmed or stopped with Ctrl-C) and the confirmed emails have been sent. They do that only for a live Run (one with an `outreach start` process), so a review typed by hand never marks anything. A resumed Run starts again as `running`, so an earlier session's review does not end it.
+`prepare` and `review` mark the Run `reviewed` when the review page has closed (confirmed or stopped with Ctrl-C) and the confirmed emails have been sent. `shortlist` marks it `reviewed` when it shortlists nothing (no Applied card dated today), since there is nothing to review. They do that only for a live Run (one with an `outreach start` process), so a review typed by hand never marks anything. A resumed Run starts again as `running`, so an earlier session's review does not end it.
 
 `--contacts N` (at least 1) is the cap for this Run, as for `pick-contacts`. `--dry-run` is stored on the Run and passed to `prepare`. One Run at a time: a second `start` while another is in progress is refused.
 
@@ -48,13 +48,13 @@ Once the page is up, `prepare` and `review` open its URL in the default browser 
 
 ## SQLite
 
-`runs.status`: `created`, `running`, then the stage markers (`shortlisted` ...), `reviewed` once the review page has closed during a live Run, and at the end `ended`, `failed` or `stopped` (each change with an `events` row). `runs.owner_pid`, `caffeinate_pid` and `claude_pid` are set only while a Run is live.
+`runs.status`: `created`, `running`, then the stage markers (`shortlisted` ...), `reviewed` once the review page has closed during a live Run (or `shortlist` found nothing to review), and at the end `ended`, `failed` or `stopped` (each change with an `events` row). `runs.owner_pid`, `caffeinate_pid` and `claude_pid` are set only while a Run is live.
 
 ## The menu: `outreach` with no command
 
 `./outreach` (a small script in the project folder that runs `uv run outreach "$@"`) or `uv run outreach`, in an interactive terminal, opens a Questionary select prompt. `outreach/menu.py` builds it from the Store, the config and the files (`build_menu`); the prompt itself is a thin layer on top. Nothing outside the project folder is changed: no aliases, no shell rc edits.
 
-The title line is the date and today's status (today's Run is `data/<date>`): `no Run yet`, `a Run is in progress in another window`, `send interrupted: N emails to finish`, `waiting for your review: N emails`, `started, not finished; Start picks up where it left off`, `all sent: N emails` or `done, nothing sent` (a practice run counts as done once its review page has closed during the Run, since its confirmed emails stay `approved`). Below it: the Gmail sign-in (`day N of 7`, or just `signed in` for a token saved before the date was kept or when `gmail_publishing_status = "production"`) and the addresses recorded as bounced today, worded "N emails undelivered; those addresses won't be used again". User-facing text says "undelivered"; the code and these docs keep `bounce`. There is no item for recording bounces: Claude records them at the start of every Run.
+The title line is the date and today's status (today's Run is `data/<date>`): `no Run yet`, `a Run is in progress in another window`, `send interrupted: N emails to finish`, `waiting for your review: N emails`, `started, not finished; Start picks up where it left off`, `done, no applications to follow up` (`shortlist` found nothing during the Run), `all sent: N emails` or `done, nothing sent` (a practice run counts as done once its review page has closed during the Run, since its confirmed emails stay `approved`). Below it: the Gmail sign-in (`day N of 7`, or just `signed in` for a token saved before the date was kept or when `gmail_publishing_status = "production"`) and the addresses recorded as bounced today, worded "N emails undelivered; those addresses won't be used again". User-facing text says "undelivered"; the code and these docs keep `bounce`. There is no item for recording bounces: Claude records them at the start of every Run.
 
 One flat list, no sub-menus, no follow-up questions and no "are you sure" (the review page's totals confirmation is the gate). Daily items above the line, upkeep below. Items marked * show only when they apply.
 
@@ -68,7 +68,7 @@ One flat list, no sub-menus, no follow-up questions and no "are you sure" (the r
 | Finish setup* | `scripts/setup-wizard.sh` (through the `Launcher`, so tests never run it) | `outreach.toml`, `credentials.json`, the Gmail token or a resume file is missing | setup is incomplete (this wins over everything) |
 | Renew Gmail sign-in | `outreach gmail-auth` | always | from day 6 of the 7-day sign-in (before a send or review); never in production |
 | Show settings | `outreach config` | always | |
-| Quit | | always (`q` also quits, as does Ctrl-C) | today's Run is done |
+| Quit | | always (`q` also quits, as does Ctrl-C) | today's Run is done, or found no applications |
 
 After an action returns (`start` included, during which Claude Code owns the terminal), the menu shows again with the new status. Ctrl-C during an action ends the action, not the menu. Every command keeps its arguments; the menu only calls them with the defaults (`data`, `data/outreach.db`, `outreach.toml`).
 
