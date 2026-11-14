@@ -248,12 +248,13 @@ def write_for_all(env: Env, ids: dict[str, int], role: str = "Backend Engineer",
 
 @pytest.fixture(autouse=True)
 def no_real_launcher(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tests inject `FakeLauncher`; the real caffeinate, Claude Code, osascript and `open` never run from a test."""
+    """Tests inject `FakeLauncher`; the real caffeinate, Claude Code, osascript, `open` and the setup wizard never
+    run from a test."""
     if request.node.get_closest_marker("real_launcher"):
         return
 
     def refuse(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a test reached the real launcher; pass FakeLauncher() to main()")
 
-    for name in ("start_caffeinate", "run_claude", "notify", "open_url"):
+    for name in ("start_caffeinate", "run_claude", "notify", "open_url", "run_wizard"):
         monkeypatch.setattr(SystemLauncher, name, refuse)

@@ -42,6 +42,7 @@ class Launcher(Protocol):
     def is_alive(self, pid: int) -> bool: ...
     def notify(self, title: str, message: str) -> None: ...
     def open_url(self, url: str) -> None: ...
+    def run_wizard(self, script: Path) -> int: ...
 
 
 class SystemLauncher:
@@ -115,6 +116,13 @@ class SystemLauncher:
             subprocess.run(["open", url], stdin=subprocess.DEVNULL, capture_output=True, check=False)
         except OSError:
             pass  # no `open` (not a Mac): the URL is still printed and in the notification
+
+
+    def run_wizard(self, script: Path) -> int:
+        """Run a bash wizard (the setup wizard) in this terminal and wait for it."""
+        if not script.exists():
+            raise UserError(f"{script}: not found; run `outreach` from the project folder")
+        return subprocess.run(["bash", str(script)], check=False).returncode
 
 
 def _reset_terminal() -> None:

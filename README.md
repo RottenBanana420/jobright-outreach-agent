@@ -116,7 +116,7 @@ Working end to end. The full Run, from `outreach start` to labelled sent emails,
 | 5. Email writing, linting and resume choice | Done |
 | 6. Gmail drafts and controlled sending | Done |
 | 7. Review page and Approval | Done |
-| 8. Testing | 316 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
+| 8. Testing | 318 automated tests; live test to my own inboxes in progress ([#7](https://github.com/RottenBanana420/jobright-outreach-agent/issues/7)) |
 
 Next up: whether publishing the Google app ends the 7-day sign-in ([#23](https://github.com/RottenBanana420/jobright-outreach-agent/issues/23)).
 

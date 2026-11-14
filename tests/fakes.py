@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import Path
 
 
 class FakeLauncher:
@@ -11,6 +12,7 @@ class FakeLauncher:
         self.models: list[str] = []
         self.notifications: list[tuple[str, str]] = []
         self.opened: list[str] = []
+        self.wizards: list[Path] = []
         self.ended_after_review: list[bool] = []  # per Claude session: did `start` end it because the review was done
         self.terminated: list[int] = []
         self.awake: set[int] = set()  # caffeinate "processes" currently running
@@ -66,3 +68,7 @@ class FakeLauncher:
 
     def open_url(self, url: str) -> None:
         self.opened.append(url)
+
+    def run_wizard(self, script: Path) -> int:
+        self.wizards.append(script)
+        return 0

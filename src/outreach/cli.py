@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-import subprocess
 import sys
 from contextlib import closing
 from datetime import UTC, datetime
@@ -18,7 +17,7 @@ from outreach.drafts import sync_run_drafts
 from outreach.emails import prepare_emails
 from outreach.errors import UserError
 from outreach.gmail import Gmail
-from outreach.menu import GMAIL, PRACTICE, REVIEW, SEND, SETTINGS, SETUP, START, STOP, Ask, Menu, build_menu, menu_loop
+from outreach.menu import SETUP, Ask, Item, Menu, build_menu, menu_loop
 from outreach.resume import resume_path, variant_for
 from outreach.run import Launcher, SystemLauncher, mark_reviewed, start_run, stop_run
 from outreach.schema import (
@@ -135,15 +134,11 @@ def _menu(launcher: Launcher, gmail: Gmail | None, ask: Ask | None) -> int:
             now=datetime.now(ZoneInfo(config.timezone)), is_alive=launcher.is_alive,
         )
 
-    def act(choice: str, menu: Menu) -> None:
-        if choice == SETUP:
-            subprocess.run(["bash", str(SETUP_WIZARD)], check=False)
-            return
-        argv = {
-            START: ["start"], PRACTICE: ["start", "--dry-run"], REVIEW: ["review", str(menu.run_dir)],
-            SEND: ["send", str(menu.run_dir)], STOP: ["stop"], GMAIL: ["gmail-auth"], SETTINGS: ["config"],
-        }[choice]
-        main(argv, launcher, gmail=gmail)
+    def act(item: Item) -> None:
+        if item.key == SETUP:
+            launcher.run_wizard(SETUP_WIZARD)
+        else:
+            main(list(item.argv), launcher, gmail=gmail)
 
     return menu_loop(build, ask or ask_questionary, act)
 

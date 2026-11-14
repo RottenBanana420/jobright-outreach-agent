@@ -27,6 +27,7 @@ from outreach.menu import (
     Menu,
     build_menu,
 )
+from outreach.run import mark_reviewed
 from outreach.store import Store
 from test_review import prepared
 from test_send import confirmed
@@ -82,7 +83,7 @@ def test_emails_waiting_for_review_put_the_pointer_on_reopening_the_page(env: En
     assert m.title.endswith("today: waiting for your review: 2 emails")
     assert m.default == REVIEW
     assert m.keys() == [START, PRACTICE, REVIEW, GMAIL, SETTINGS, QUIT]
-    assert m.run_dir == env.run_dir
+    assert m.item(REVIEW).argv == ("review", str(env.run_dir))
 
 
 def test_an_interrupted_send_puts_the_pointer_on_finishing_it(env: Env) -> None:
@@ -229,3 +230,32 @@ def test_enter_takes_the_highlighted_item_a_number_picks_another_and_q_quits(
     finish_setup(env)
 
     assert answer_with(keys, menu(env)) == chosen
+
+
+def test_a_practice_run_whose_review_page_closed_is_done_not_waiting(env: Env) -> None:
+    prepared(env, contacts=1, dry_run=True)
+    finish_setup(env)
+    with closing(Store(env.db)) as store, store.transaction():
+        run = store.find_run(env.run_dir)
+        assert run is not None
+        store.set_run_processes(run["id"], os.getpid(), None, None)  # as during `outreach start`
+        mark_reviewed(store, run["id"])
+        store.set_run_processes(run["id"], None, None, None)
+        store.set_status("runs", run["id"], "ended", "review finished")
+
+    m = menu(env)
+
+    assert m.title.endswith("today: done, nothing sent (practice run)")
+    assert REVIEW not in m.keys()
+    assert m.default == QUIT
+
+
+def test_finish_setup_runs_the_setup_wizard_then_shows_the_menu_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    answers = iter([SETUP, QUIT])
+    launcher = FakeLauncher()
+
+    assert main([], launcher, ask=lambda m: next(answers)) == 0
+    assert launcher.wizards == [Path("scripts/setup-wizard.sh")]

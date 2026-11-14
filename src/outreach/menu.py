@@ -32,6 +32,7 @@ SETUP, GMAIL, SETTINGS, QUIT = "setup", "gmail", "settings", "quit"
 class Item:
     key: str
     label: str
+    argv: tuple[str, ...] = ()  # the `outreach` command the item runs; empty for Setup and Quit
 
 
 @dataclass(frozen=True)
@@ -41,10 +42,12 @@ class Menu:
     daily: tuple[Item, ...]  # above the separator
     upkeep: tuple[Item, ...]  # below it
     default: str  # the key of the item the pointer starts on
-    run_dir: Path  # today's Run folder
 
     def keys(self) -> list[str]:
         return [i.key for i in (*self.daily, *self.upkeep)]
+
+    def item(self, key: str) -> Item:
+        return next(i for i in (*self.daily, *self.upkeep) if i.key == key)
 
 
 Ask = Callable[[Menu], "str | None"]
@@ -61,11 +64,15 @@ def missing_setup(config: Config, config_file: Path) -> list[str]:
         missing.append(config_file.name)
     if not Path(config.gmail_credentials).exists():
         missing.append(Path(config.gmail_credentials).name)
-    if not Path(config.gmail_token).exists():
+    if not _signed_in(config):
         missing.append("Gmail sign-in")
     if not all(resume_path(config, v).exists() for v in config.resume_files):
         missing.append("resume files")
     return missing
+
+
+def _signed_in(config: Config) -> bool:
+    return Path(config.gmail_token).exists()
 
 
 def _gmail_day(config: Config, today: datetime) -> int | None:
@@ -110,7 +117,10 @@ def build_menu(
                 dry_run = bool(run["dry_run"])
                 emails = store.run_emails(run["id"])
                 interrupted = len(store.unfinished_emails(run["id"]))
-                waiting = sum(1 for e in emails if e["status"] in ("written", "approved"))
+                # A practice run's confirmed emails stay `approved` (nothing is marked to send), so once its review
+                # page has closed during the Run, nothing is waiting any more.
+                closed = dry_run and store.run_reached(run["id"], "reviewed")
+                waiting = 0 if closed else sum(1 for e in emails if e["status"] in ("written", "approved"))
                 sent = sum(1 for e in emails if e["status"] == "sent")
                 has_emails = bool(emails)
 
@@ -132,24 +142,31 @@ def build_menu(
     missing = missing_setup(config, config_file)
     notes: list[str] = []
     gmail_day: int | None = None
-    if "Gmail sign-in" not in missing:
+    if _signed_in(config):
         gmail_day = _gmail_day(config, now)
         notes.append(_gmail_note(gmail_day))
     if undelivered:
         those = "that address" if undelivered == 1 else "those addresses"
         notes.append(f"{_emails(undelivered)} undelivered; {those} won't be used again")
 
-    daily = [Item(START, "Start today's Run"), Item(PRACTICE, "Practice run (nothing is sent)")]
+    daily = [
+        Item(START, "Start today's Run", ("start",)),
+        Item(PRACTICE, "Practice run (nothing is sent)", ("start", "--dry-run")),
+    ]
     if waiting and not live and not interrupted:
-        daily.append(Item(REVIEW, "Reopen the review page"))
+        daily.append(Item(REVIEW, "Reopen the review page", ("review", str(run_dir))))
     if interrupted and not live:
-        daily.append(Item(SEND, "Finish an interrupted send"))
+        daily.append(Item(SEND, "Finish an interrupted send", ("send", str(run_dir))))
     if live:
-        daily.append(Item(STOP, "Stop the Run"))
+        daily.append(Item(STOP, "Stop the Run", ("stop",)))
     upkeep = []
     if missing:
         upkeep.append(Item(SETUP, f"Finish setup (missing: {', '.join(missing)})"))
-    upkeep += [Item(GMAIL, "Renew Gmail sign-in"), Item(SETTINGS, "Show settings"), Item(QUIT, "Quit")]
+    upkeep += [
+        Item(GMAIL, "Renew Gmail sign-in", ("gmail-auth",)),
+        Item(SETTINGS, "Show settings", ("config",)),
+        Item(QUIT, "Quit"),
+    ]
 
     if missing:
         default = SETUP
@@ -166,10 +183,10 @@ def build_menu(
     else:
         default = QUIT  # today's Run is done
     title = f"Outreach · {now:%a} {now.day} {now:%b} · today: {status}"
-    return Menu(title, tuple(notes), tuple(daily), tuple(upkeep), default, run_dir)
+    return Menu(title, tuple(notes), tuple(daily), tuple(upkeep), default)
 
 
-def menu_loop(build: Callable[[], Menu], ask: Ask, act: Callable[[str, Menu], object]) -> int:
+def menu_loop(build: Callable[[], Menu], ask: Ask, act: Callable[[Item], object]) -> int:
     """Show the menu, run the chosen action, then show it again with the new status, until Quit."""
     while True:
         menu = build()
@@ -177,7 +194,7 @@ def menu_loop(build: Callable[[], Menu], ask: Ask, act: Callable[[str, Menu], ob
         if choice is None or choice == QUIT:
             return 0
         try:
-            act(choice, menu)
+            act(menu.item(choice))
         except KeyboardInterrupt:
             print()  # Ctrl-C ends the action, not the menu
         print()
