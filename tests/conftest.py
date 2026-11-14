@@ -12,6 +12,7 @@ import pytest
 
 from fake_gmail import FakeGmail
 from outreach.cli import main
+from outreach.run import SystemLauncher
 
 # 2026-11-13 02:00 UTC is still 2026-11-12 in America/Los_Angeles.
 NOW = "2026-11-12T12:00:00-08:00"
@@ -243,3 +244,16 @@ def write_for_all(env: Env, ids: dict[str, int], role: str = "Backend Engineer",
     """Reveal an address and write one passing email for each picked Contact."""
     env.write_revealed([{"contact_id": i, "address": address_for(n)} for n, i in ids.items()])
     env.write_emails([make_email(i, address_for(n), role, **over) for n, i in ids.items()])
+
+
+@pytest.fixture(autouse=True)
+def no_real_launcher(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests inject `FakeLauncher`; the real caffeinate, Claude Code and osascript never run from a test."""
+    if request.node.get_closest_marker("real_launcher"):
+        return
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a test reached the real launcher; pass FakeLauncher() to main()")
+
+    for name in ("start_caffeinate", "run_claude", "notify"):
+        monkeypatch.setattr(SystemLauncher, name, refuse)

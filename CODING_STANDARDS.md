@@ -8,3 +8,9 @@ Read by the reviewer, not the implementer. Ruff, mypy and pytest (see `.github/w
 - **One validator per rule**: a rule that applies to a handoff file and to the review page (subject on one line, body length) lives in `schema.py`, and both callers use it.
 - **Safety stays in Python**: dry-run, "only approved emails are sent" and "one recipient" are enforced in code. A prompt or a page control alone is not enough.
 - **Fixtures**: tests use synthetic names and addresses, and test titles in their common spellings (hyphenated, mixed case).
+- **Outside calls stay outside transactions**: no Gmail or other network call while a Store transaction is open. Save each external id (a draft id) the moment it exists, so a later failure cannot orphan it.
+- **Adapters own their errors**: the real Gmail adapter turns every failure (bad JSON, missing key, HTTP 4xx) into a `GmailError` subtype, so callers catch only those. A caller that must not lose work on any error (the Sender) also handles `OSError` per email.
+- **In flight means ready**: set an email to `sending` only after the draft and attachment are ready, so a local failure never leaves it looking half-sent.
+- **Skipped rows still count**: a rule that skips locked emails (sent, sending) still registers their address for duplicate checks.
+- **Best-effort side effects**: a notification or any other convenience never aborts the Run.
+- **Tests never reach the real launcher**: tests pass `FakeLauncher` to `main()`. A conftest guard fails any test that reaches the real caffeinate, Claude Code or osascript; mark a test `real_launcher` only when it runs the real one on harmless input.
